@@ -1,4 +1,4 @@
-__version__ = '0.1.0'
+__version__ = '0.1.3'
 
 from functools import wraps
 import requests
@@ -67,12 +67,14 @@ class Auth:
 
         app_profile = self._get_app_profile(api_key)
 
-        if app_profile['sistema']['nome']:
+        if app_profile['tipo'] == 'sistema':
             return
 
-        raise Unauthorized()
+        raise Unauthorized('Somente api-keys de sistema são válidas')
 
-    def _verify_access_token(self, user_required_permissions: list = None):
+    def _verify_access_token(
+            self, user_internal_permissions: list = None, user_tenant_permissions: list = None):
+
         access_token = request.headers.get(self._access_token_header)
 
         if not access_token:
@@ -86,19 +88,19 @@ class Auth:
         if not email:
             raise Unauthorized('O token do usuário não é válido')
 
-        if user_required_permissions:
+        if user_internal_permissions:
             self._verify_user_permissions(
-                user_required_permissions, email)
+                user_internal_permissions, email)
             return
 
-        if self._user_required_permissions:
+        if self._user_internal_permissions:
             self._verify_user_permissions(
-                self._user_required_permissions, email)
+                self._user_internal_permissions, email)
             return
 
-        raise Unauthorized('O token do usuário não é válido')
+        return
 
-    def _verify_user_permissions(self, user_required_permissions: list, email: str):
+    def _verify_user_permissions(self, user_internal_permissions: list, email: str):
 
         user_profile = None
 
@@ -118,14 +120,18 @@ class Auth:
         if self._cache:
             self._cache.set(email, user_profile)
 
-        if list(set(user_profile.get('permissoes', [])) & set(user_required_permissions)):
+        if list(set(user_profile.get('permissao', [])) & set(user_internal_permissions)):
             return
 
         raise Unauthorized(
             'O usuário não possui permissão para acessar este recurso.')
 
     def _verify_api_key_or_access_token(
-            self, app_required_permissions: list = None, user_required_permissions: list = None):
+            self,
+            app_required_permissions: list = None,
+            user_internal_permissions: list = None,
+            user_tenant_permissions: list = None
+    ):
         message = ''
 
         try:
@@ -134,14 +140,15 @@ class Auth:
         except MissingAuthorizationHeader:
             pass
         except Unauthorized as e:
-            message = e.message
+            message = e
             pass
 
         try:
-            self._verify_access_token(user_required_permissions)
+            self._verify_access_token(user_internal_permissions)
             return
         except MissingAuthorizationHeader:
-            pass
+            if not message:
+                message = "Missing Authorization header"
 
         raise Unauthorized(message)
 
@@ -151,6 +158,9 @@ class Auth:
             user_profile = self._cache.get(access_token)
             if user_profile:
                 return user_profile
+
+        if 'Bearer ' not in access_token:
+            access_token = 'Bearer ' + access_token
 
         headers = {'Authorization': access_token}
         response = requests.get(self._profile_uri, headers=headers)
@@ -177,8 +187,9 @@ class Auth:
             "Content-Type": "application/x-www-form-urlencoded"
         }
 
-        response = requests.get(self._diretorio_base_uri,
-                                data=data, headers=headers)
+        url = self._diretorio_base_uri + '/validate'
+
+        response = requests.post(url, data=data, headers=headers)
 
         if response.status_code != 200:
             raise Unauthorized('A api-key do sistema não é válida')
@@ -202,12 +213,14 @@ class Auth:
                     self._verify_api_key(app_required_permissions)
                     return func(*args, **kwargs)
                 except Unauthorized as e:
-                    abort(jsonify({'Erro': f'{e.message}'}), 401)
+                    abort(jsonify({'Erro': f'{e}'}), 401)
             return wrapper
         return decorator
 
-    def requires_access_token(self, user_internal_permissions: list = None,
-                              user_tenant_permissions: list = None):
+    def requires_access_token(
+        self, user_internal_permissions: list = None,
+        user_tenant_permissions: list = None
+    ):
         """Decorador que garante o envio de um access token válido. Caso não seja enviadu ou seja
         enviado um access token inválido, a chamada será automaticamente abortada. A parametrização 
         da mensagem de erro ainda não está disponível. O decorador também aceita como parametro
@@ -224,13 +237,15 @@ class Auth:
                         user_internal_permissions, user_tenant_permissions)
                     return func(*args, **kwargs)
                 except Unauthorized as e:
-                    abort(jsonify({'Erro': f'{e.message}'}), 401)
+                    abort(jsonify({'Erro': f'{e}'}), 401)
             return wrapper
         return decorator
 
     def requires_api_key_or_access_token(
-            self, app_required_permissions: list = None, user_internal_permissions: list = None,
-            user_tenant_permissions: list = None):
+        self, app_required_permissions: list = None,
+        user_internal_permissions: list = None,
+        user_tenant_permissions: list = None
+    ):
         """Fluxo que implementa os decoradores requires_access_token e requires_api_key. 
         Neste fluxo, caso seja enviado na mesma requisição um access token e uma api key, 
         primeiro é validado o api-key e se for válido, o access token é ignorado. 
@@ -240,10 +255,12 @@ class Auth:
             def wrapper(*args, **kwargs):
                 try:
                     self._verify_api_key_or_access_token(
-                        app_required_permissions, user_internal_permissions,
-                        user_tenant_permissions)
+                        app_required_permissions,
+                        user_internal_permissions,
+                        user_tenant_permissions
+                    )
                     return func(*args, **kwargs)
                 except Unauthorized as e:
-                    abort(jsonify({'Erro': f'{e.message}'}), 401)
+                    abort(jsonify({'Erro': f'{e}'}), 401)
             return wrapper
         return decorator

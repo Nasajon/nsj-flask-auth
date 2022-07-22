@@ -1,9 +1,9 @@
-__version__ = '0.1.2'
+__version__ = '0.1.6'
 
 from functools import wraps
 import requests
 
-from flask import request, abort, jsonify
+from flask import request, abort
 
 from nsj_flask_auth.caching import Caching
 
@@ -213,7 +213,7 @@ class Auth:
                     self._verify_api_key(app_required_permissions)
                     return func(*args, **kwargs)
                 except Unauthorized as e:
-                    abort(jsonify({'Erro': f'{e}'}), 401)
+                    abort(401, f'{e}')
             return wrapper
         return decorator
 
@@ -237,7 +237,7 @@ class Auth:
                         user_internal_permissions, user_tenant_permissions)
                     return func(*args, **kwargs)
                 except Unauthorized as e:
-                    abort(jsonify({'Erro': f'{e}'}), 401)
+                    abort(401, f'{e}')
             return wrapper
         return decorator
 
@@ -261,6 +261,6 @@ class Auth:
                     )
                     return func(*args, **kwargs)
                 except Unauthorized as e:
-                    abort(jsonify({'Erro': f'{e}'}), 401)
+                    abort(401, f'{e}')
             return wrapper
         return decorator

@@ -108,7 +108,7 @@ class Auth:
             user_profile = self._cache.get(email)
 
         if not user_profile:
-            url = self._diretorio_base_uri + '/profile/' + email
+            url = self._diretorio_base_uri + '/v2/api/profile/' + email
             headers = {'apikey': self._diretorio_api_key}
             response = requests.get(url, headers=headers)
 
@@ -187,7 +187,7 @@ class Auth:
             "Content-Type": "application/x-www-form-urlencoded"
         }
 
-        url = self._diretorio_base_uri + '/validate'
+        url = self._diretorio_base_uri + 'v2/api/validate'
 
         response = requests.post(url, data=data, headers=headers)
 
@@ -198,6 +198,30 @@ class Auth:
             self._cache.set(api_key, response.json())
 
         return response.json()
+
+    def _get_permissions_by_function(self, function_id):
+
+        permissions = None
+
+        if self._cache:
+            permissions = self._cache.get(function_id)
+            if permissions:
+                return permissions
+        
+        if not permissions:
+            url = self._diretorio_base_uri + 'v2/api/funcoes/{function_id}/permissoes'
+            headers = {'apikey': self._diretorio_api_key}
+            response = requests.get(url)
+
+            if response.status_code != 200:
+                raise Unauthorized('A api-key do sistema não é válida')
+            
+            permissions = response.json()
+
+            if self._cache:
+                self._cache.set(function_id, permissions)
+        
+        return permissions
 
     def requires_api_key(self, app_required_permissions: list = None):
         """Decorador que garante o envio de uma api-key válida. Caso não seja enviada ou seja

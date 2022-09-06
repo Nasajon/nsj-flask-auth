@@ -5,6 +5,7 @@ from enum import Enum
 from functools import wraps
 import requests
 from flask import request, abort
+from urllib.parse import urljoin
 from nsj_flask_auth.caching import Caching
 from nsj_flask_auth.exceptions.unauthorized import Unauthorized
 from nsj_flask_auth.exceptions.missing_auth_header import MissingAuthorizationHeader
@@ -127,8 +128,9 @@ class Auth:
         if user_profile:
             return user_profile
 
-        url = self._diretorio_base_uri + '/v2/api/profile/' + email
+        url = urljoin(self._diretorio_base_uri, f'/v2/api/profile/{email}')
         headers = {'apikey': self._diretorio_api_key}
+
         response = requests.get(url, headers=headers)
 
         if response.status_code != 200:
@@ -161,8 +163,8 @@ class Auth:
         all_permissions = []
 
         for function in functions:
-            permissions += self._get_permissions_by_function(function)
-        
+            all_permissions += self._get_permissions_by_function(function["id"])
+
         if list(set(all_permissions) & set(permissions)):
             return
 
@@ -272,7 +274,7 @@ class Auth:
             "Content-Type": "application/x-www-form-urlencoded"
         }
 
-        url = self._diretorio_base_uri + 'v2/api/validate'
+        url = urljoin(self._diretorio_base_uri, 'v2/api/validate')
 
         response = requests.post(url, data=data, headers=headers)
 
@@ -294,8 +296,7 @@ class Auth:
                 return permissions
 
         if not permissions:
-            url = self._diretorio_base_uri + \
-                'v2/api/funcoes/{function_id}/permissoes'
+            url = urljoin(self._diretorio_base_uri, f'v2/api/funcoes/{function_id}/permissoes')
             headers = {'apikey': self._diretorio_api_key}
             response = requests.get(url, headers=headers)
 
@@ -331,7 +332,6 @@ class Auth:
         self, user_internal_permissions: List = None,
         scope: Scope = Scope.GRUPO_EMPRESARIAL,
         user_scope_permissions: List = None,
-
     ):
         """Decorador que garante o envio de um access token válido. Caso não seja enviado ou seja
         enviado um access token inválido, a chamada será automaticamente abortada. A parametrização 

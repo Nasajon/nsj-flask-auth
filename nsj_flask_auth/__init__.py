@@ -70,7 +70,7 @@ class Auth:
 
         if app_profile.get("tipo") == "sistema":
             g.profile = {
-                'nome': app_profile.get('nome'),
+                'nome': app_profile['sistema'].get('nome'),
                 'email': ''
             }
             return

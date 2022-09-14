@@ -68,8 +68,11 @@ class Auth:
 
         app_profile = self._get_app_profile(api_key)
 
-        if app_profile["tipo"] == "sistema":
-            g.profile = app_profile
+        if app_profile.get("tipo") == "sistema":
+            g.profile = {
+                'nome': app_profile.get('nome'),
+                'email': ''
+            }
             return
 
         raise Unauthorized("Somente api-keys de sistema são válidas")
@@ -102,7 +105,10 @@ class Auth:
             self._verify_user_permissions(self._user_internal_permissions, email)
             return
 
-        g.profile = user_profile
+        g.profile = {
+            'nome': user_profile.get('name'),
+            'email': user_profile.get('email')
+        }
 
         return
 

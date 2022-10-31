@@ -1,14 +1,21 @@
-__version__ = '0.1.2'
+__version__ = '0.1.6'
 
+from typing import List
+from enum import Enum
 from functools import wraps
 import requests
-
-from flask import request, abort, jsonify
-
+from flask import request, abort
+from urllib.parse import urljoin
 from nsj_flask_auth.caching import Caching
-
 from nsj_flask_auth.exceptions.unauthorized import Unauthorized
 from nsj_flask_auth.exceptions.missing_auth_header import MissingAuthorizationHeader
+
+
+class Scope(Enum):
+    TENANT = 0
+    GRUPO_EMPRESARIAL = 1
+    EMPRESA = 2
+    ESTABELECIMENTO = 3
 
 
 class Auth:
@@ -42,9 +49,10 @@ class Auth:
         diretorio_api_key: str = None,
         api_key_header: str = 'X-API-Key',
         access_token_header: str = 'Authorization',
-        user_internal_permissions: list = [],
-        user_tenant_permissions: list = [],
-        app_required_permissions: list = [],
+        user_internal_permissions: List = [],
+        scope: Scope = Scope.GRUPO_EMPRESARIAL,
+        user_scope_permissions: List = [],
+        app_required_permissions: List = [],
         caching_service=None
     ):
         self._diretorio_base_uri = diretorio_base_uri
@@ -53,12 +61,13 @@ class Auth:
         self._api_key_header = api_key_header
         self._access_token_header = access_token_header
         self._user_internal_permissions = user_internal_permissions
-        self._user_tenant_permissions = user_tenant_permissions
+        self._scope: Scope = scope
+        self._user_scope_permissions = user_scope_permissions
         self._app_required_permissions = app_required_permissions
         if caching_service:
             self._cache = Caching(caching_service)
 
-    def _verify_api_key(self, app_required_permissions: list = None):
+    def _verify_api_key(self, app_required_permissions: List = None):
         api_key = request.headers.get(self._api_key_header)
 
         if not api_key:
@@ -73,7 +82,7 @@ class Auth:
         raise Unauthorized('Somente api-keys de sistema são válidas')
 
     def _verify_access_token(
-            self, user_internal_permissions: list = None, user_tenant_permissions: list = None):
+            self, user_internal_permissions: List = None, scope: Scope = Scope.GRUPO_EMPRESARIAL, user_scope_permissions: List = None):
 
         access_token = request.headers.get(self._access_token_header)
 
@@ -98,27 +107,45 @@ class Auth:
                 self._user_internal_permissions, email)
             return
 
+        if user_scope_permissions:
+            self._verify_permission_by_scope(
+                user_scope_permissions, email, scope=scope)
+            return
+
+        if self._user_scope_permissions:
+            self._verify_permission_by_scope(
+                self._user_scope_permissions, email, scope=self._scope)
+            return
+
         return
 
-    def _verify_user_permissions(self, user_internal_permissions: list, email: str):
-
+    def _get_user_profile_diretorio(self, email):
         user_profile = None
 
         if self._cache:
             user_profile = self._cache.get(email)
 
-        if not user_profile:
-            url = self._diretorio_base_uri + '/profile/' + email
-            headers = {'apikey': self._diretorio_api_key}
-            response = requests.get(url, headers=headers)
+        if user_profile:
+            return user_profile
 
-            if response.status_code != 200:
-                raise Unauthorized('A api-key do sistema não é válida')
+        url = urljoin(self._diretorio_base_uri, f'/v2/api/profile/{email}')
+        headers = {'apikey': self._diretorio_api_key}
 
-            user_profile = response.json()
+        response = requests.get(url, headers=headers)
+
+        if response.status_code != 200:
+            raise Unauthorized('A api-key do sistema não é válida')
+
+        user_profile = response.json()
 
         if self._cache:
             self._cache.set(email, user_profile)
+
+        return user_profile
+
+    def _verify_user_permissions(self, user_internal_permissions: List, email: str):
+
+        user_profile = self._get_user_profile_diretorio(email)
 
         if list(set(user_profile.get('permissao', [])) & set(user_internal_permissions)):
             return
@@ -126,11 +153,70 @@ class Auth:
         raise Unauthorized(
             'O usuário não possui permissão para acessar este recurso.')
 
+    def _verify_permission_by_scope(self, permissions: List, email: str, scope: Scope = Scope.GRUPO_EMPRESARIAL):
+        user_profile = self._get_user_profile_diretorio(email)
+
+        entity_scope_id = self._get_entity_scope_id_from_request(scope)
+
+        functions = self._get_functions_by_entity_scope_id(user_profile, scope, entity_scope_id)
+
+        all_permissions = []
+
+        for function in functions:
+            all_permissions += self._get_permissions_by_function(function["id"])
+
+        if list(set(all_permissions) & set(permissions)):
+            return
+
+        raise Unauthorized(
+            'O usuário não possui permissão para acessar este recurso.')
+    
+    def _get_entity_scope_id_from_request(self, scope: Scope = Scope.GRUPO_EMPRESARIAL):
+        data = {}
+        if request.method in ["GET", "DELETE"]:
+            data = request.args
+        elif request.method in ["POST", "PUT", "PATCH"]:
+            data = request.get_json()
+        else:
+            data = request.args
+        
+        if scope == Scope.TENANT:
+            return data.get("tenant")
+        elif scope == Scope.GRUPO_EMPRESARIAL:
+            return data.get("grupo_empresarial")
+        elif scope == Scope.EMPRESA:
+            return data.get("empresa")
+        elif scope == Scope.ESTABELECIMENTO:
+            return data.get("estabelecimento")
+
+    
+    def _get_functions_by_entity_scope_id(self, user_profile, scope: Scope, entity_scope_id):
+        # Loop through tenants
+        for tenant in user_profile.get("tenants"):
+            if scope == Scope.TENANT and tenant.get("id") == entity_scope_id:
+                return tenant.get("funcoes")
+            # Loop through gruposempresariais
+            for grupoempresarial in tenant.get("gruposempresariais"):
+                if scope == Scope.GRUPO_EMPRESARIAL and grupoempresarial.get("id") == entity_scope_id:
+                    return grupoempresarial.get("funcoes")
+                # Loop through empresas
+                for empresa in grupoempresarial.get("empresas"):
+                    if scope == Scope.EMPRESA and empresa.get("id") == entity_scope_id:
+                        return empresa.get("funcoes")
+                    # Loop through estabelecimentos
+                    for estabelecimento in empresa.get("estabelecimentos"):
+                        if scope == Scope.ESTABELECIMENTO and estabelecimento.get("id") == entity_scope_id:
+                            return estabelecimento.get("funcoes")
+        
+        return []
+
+
     def _verify_api_key_or_access_token(
             self,
             app_required_permissions: list = None,
             user_internal_permissions: list = None,
-            user_tenant_permissions: list = None
+            scope: Scope = Scope.GRUPO_EMPRESARIAL,
+            user_scope_permissions: list = None
     ):
         message = ''
 
@@ -144,7 +230,8 @@ class Auth:
             pass
 
         try:
-            self._verify_access_token(user_internal_permissions)
+            self._verify_access_token(
+                user_internal_permissions, scope, user_scope_permissions)
             return
         except MissingAuthorizationHeader:
             if not message:
@@ -187,7 +274,7 @@ class Auth:
             "Content-Type": "application/x-www-form-urlencoded"
         }
 
-        url = self._diretorio_base_uri + '/validate'
+        url = urljoin(self._diretorio_base_uri, 'v2/api/validate')
 
         response = requests.post(url, data=data, headers=headers)
 
@@ -199,7 +286,31 @@ class Auth:
 
         return response.json()
 
-    def requires_api_key(self, app_required_permissions: list = None):
+    def _get_permissions_by_function(self, function_id):
+
+        permissions = None
+
+        if self._cache:
+            permissions = self._cache.get(function_id)
+            if permissions:
+                return permissions
+
+        if not permissions:
+            url = urljoin(self._diretorio_base_uri, f'v2/api/funcoes/{function_id}/permissoes')
+            headers = {'apikey': self._diretorio_api_key}
+            response = requests.get(url, headers=headers)
+
+            if response.status_code != 200:
+                raise Unauthorized('A api-key do sistema não é válida')
+
+            permissions = response.json()
+
+            if self._cache:
+                self._cache.set(function_id, permissions)
+
+        return permissions
+
+    def requires_api_key(self, app_required_permissions: List = None):
         """Decorador que garante o envio de uma api-key válida. Caso não seja enviada ou seja
         enviado uma api-key inválida, a chamada será automaticamente abortada. A parametrização 
         da mensagem de erro ainda não está disponível. O decorador também aceita como parametro
@@ -213,15 +324,16 @@ class Auth:
                     self._verify_api_key(app_required_permissions)
                     return func(*args, **kwargs)
                 except Unauthorized as e:
-                    abort(jsonify({'Erro': f'{e}'}), 401)
+                    abort(401, f'{e}')
             return wrapper
         return decorator
 
     def requires_access_token(
-        self, user_internal_permissions: list = None,
-        user_tenant_permissions: list = None
+        self, user_internal_permissions: List = None,
+        scope: Scope = Scope.GRUPO_EMPRESARIAL,
+        user_scope_permissions: List = None,
     ):
-        """Decorador que garante o envio de um access token válido. Caso não seja enviadu ou seja
+        """Decorador que garante o envio de um access token válido. Caso não seja enviado ou seja
         enviado um access token inválido, a chamada será automaticamente abortada. A parametrização 
         da mensagem de erro ainda não está disponível. O decorador também aceita como parametro
         uma lista de permissões internas que o usuário deve ter para acessar o recurso. 
@@ -234,17 +346,18 @@ class Auth:
             def wrapper(*args, **kwargs):
                 try:
                     self._verify_access_token(
-                        user_internal_permissions, user_tenant_permissions)
+                        user_internal_permissions, scope, user_scope_permissions)
                     return func(*args, **kwargs)
                 except Unauthorized as e:
-                    abort(jsonify({'Erro': f'{e}'}), 401)
+                    abort(401, f'{e}')
             return wrapper
         return decorator
 
     def requires_api_key_or_access_token(
-        self, app_required_permissions: list = None,
-        user_internal_permissions: list = None,
-        user_tenant_permissions: list = None
+        self, app_required_permissions: List = None,
+        user_internal_permissions: List = None,
+        scope: Scope = Scope.GRUPO_EMPRESARIAL,
+        user_scope_permissions: List = None
     ):
         """Fluxo que implementa os decoradores requires_access_token e requires_api_key. 
         Neste fluxo, caso seja enviado na mesma requisição um access token e uma api key, 
@@ -257,10 +370,11 @@ class Auth:
                     self._verify_api_key_or_access_token(
                         app_required_permissions,
                         user_internal_permissions,
-                        user_tenant_permissions
+                        scope,
+                        user_scope_permissions
                     )
                     return func(*args, **kwargs)
                 except Unauthorized as e:
-                    abort(jsonify({'Erro': f'{e}'}), 401)
+                    abort(401, f'{e}')
             return wrapper
         return decorator

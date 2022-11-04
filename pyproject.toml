@@ -5,7 +5,7 @@ description = "Modulo básico para autenticação de aplicações Flask no conte
 authors = ["Lucas Assis <lucasassis@nasajon.com.br>"]
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = "^3.6"
 Flask = "*"
 requests = "*"
 

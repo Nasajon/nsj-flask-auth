@@ -82,7 +82,11 @@ class Auth:
         app_profile = self._get_app_profile(api_key)
 
         if app_profile.get("tipo") == "sistema":
-            g.profile = {"nome": app_profile["sistema"].get("nome"), "email": ""}
+            g.profile = {
+                "nome": app_profile["sistema"].get("nome"),
+                "email": "",
+                "authentication_type": "api_key",
+            }
             return
 
         raise Unauthorized("Somente api-keys de sistema são válidas")
@@ -109,16 +113,19 @@ class Auth:
             raise Unauthorized("O token do usuário não é válido")
 
         if user_internal_permissions:
-            self._verify_user_permissions(user_internal_permissions, email)
-            return
+            profile = self._verify_user_permissions(user_internal_permissions, email)
 
         if self._user_internal_permissions:
-            self._verify_user_permissions(self._user_internal_permissions, email)
-            return
+            profile = self._verify_user_permissions(self._user_internal_permissions, email)
+
+        else:
+            profile = self._verify_user_permissions(None, email)
 
         g.profile = {
             "nome": user_profile.get("name"),
             "email": user_profile.get("email"),
+            "profile": profile,
+            "authentication_type": "access_token",
         }
 
         if user_scope_permissions:

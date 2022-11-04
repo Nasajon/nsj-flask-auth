@@ -175,10 +175,13 @@ class Auth:
 
         user_profile = self._get_user_profile_diretorio(email)
 
+        if not user_internal_permissions:
+            return user_profile
+
         if list(
             set(user_profile.get("permissao", [])) & set(user_internal_permissions)
         ):
-            return
+            return user_profile
 
         raise Unauthorized("O usuário não possui permissão para acessar este recurso.")
 

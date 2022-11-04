@@ -1,4 +1,5 @@
-__version__ = "0.1.7"
+__version__ = "0.1.9"
+
 
 from functools import wraps
 import requests
@@ -68,8 +69,8 @@ class Auth:
 
         app_profile = self._get_app_profile(api_key)
 
-        if app_profile["tipo"] == "sistema":
-            g.user = app_profile["sistema"]["nome"]
+        if app_profile.get("tipo") == "sistema":
+            g.profile = {"nome": app_profile["sistema"].get("nome"), "email": ""}
             return
 
         raise Unauthorized("Somente api-keys de sistema são válidas")
@@ -102,7 +103,10 @@ class Auth:
             self._verify_user_permissions(self._user_internal_permissions, email)
             return
 
-        g.user = email
+        g.profile = {
+            "nome": user_profile.get("name"),
+            "email": user_profile.get("email"),
+        }
 
         return
 

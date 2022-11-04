@@ -3,6 +3,4 @@
 __pycache__/
 .env
 dist/*
-*.lock
-*.toml
 *.rst

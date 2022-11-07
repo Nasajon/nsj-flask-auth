@@ -124,7 +124,7 @@ class Auth:
         g.profile = {
             "nome": user_profile.get("name"),
             "email": user_profile.get("email"),
-            "profile": profile,
+            "user_profile": profile,
             "authentication_type": "access_token",
         }
 

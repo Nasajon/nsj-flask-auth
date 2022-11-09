@@ -359,7 +359,7 @@ class Auth:
         enviado uma api-key inválida, a chamada será automaticamente abortada. A parametrização
         da mensagem de erro ainda não está disponível. O decorador também aceita como parametro
         uma lista de permissões que o sistema deve ter para acessar o recurso. Esta lista trabalha
-        em adição a lista fornceida na inicialização da classe.
+        em adição a lista fornecida na inicialização da classe.
         """
 
         def decorator(func):
@@ -384,10 +384,10 @@ class Auth:
         """Decorador que garante o envio de um access token válido. Caso não seja enviado ou seja
         enviado um access token inválido, a chamada será automaticamente abortada. A parametrização
         da mensagem de erro ainda não está disponível. O decorador também aceita como parametro
-        uma lista de permissões internas que o usuário deve ter para acessar o recurso.
-        Esta lista trabalha em adição a lista fornceida na inicialização da classe. Também é
-        possível fornecer uma lista de permissões por tenant, porém esta funcionalidade ainda
-        não está disponível.
+        uma lista de permissões internas que o usuário deve ter para acessar o recurso. 
+        Esta lista trabalha em adição a lista fornecida na inicialização da classe. Também é 
+        possível fornecer uma lista de permissões por tenant, grupo empresarial, empresa ou estabelecimento,
+        sendo necessario definir quais deste escopo deve-se considerar e a lista de permissões.
         """
 
         def decorator(func):

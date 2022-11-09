@@ -23,9 +23,9 @@ Neste exemplo queremos proteger o endpoint "hello_world" com autenticação e au
 Criemos na raiz da nossa aplicação (a mesma pasta onde se encontra o código da nossa API citada acima) o arquivo `auth.py`:
 
 ```python
-from nsj_flask_auth import Auth
+from nsj_flask_auth import Auth, Scope
 
-auth = Auth(DIRETORIO_ENDPOINT, PROFILE_ENDPOINT, API_KEY)
+auth = Auth(DIRETORIO_ENDPOINT, PROFILE_ENDPOINT, API_KEY, scope=Scope.GRUPO_EMPRESARIAL, user_scope_permissions=["permissao_1", "permissao_2"])
 ```
 
 E criamos uma instância da classe Auth disponiblizada no módulo com os parametros:
@@ -58,7 +58,8 @@ Esta é a implementação mínima do módulo. Mais detalhes sobre parametrizaç�
 * API_KEY_HEADER: Nome do cabeçalho que será usado para receber a chave de autenticação.
 * ACCESS_TOKEN_HEADER: Nome do cabeçalho que será usado para receber o access_token.
 * USER_INTERNAL_PERMISSIONS: lista de permissões internas que o usuário precisa para acessar os endpoints da aplicação.
-* USER_TENANT_PERMISSIONS: ainda não implementado.
+* USER_SCOPE_PERMISSIONS: lista de permissões em dado escopo que o usuário precisa ter para acessar os endpoints da aplicação.
+* SCOPE: escopo em que as permissões (vide parâmetro acima) devem ser verificadas. Pode ser tenant, grupo empresarial, empresa e estabelecimento. O padrão é grupo empresarial.
 * APP_REQUIRED_PERMISSIONS: lista de permissões que o sistema precisa para acessar os endpoints da aplicação.
 * CACHING_SERVICE: instancia do serviço de cache. Até o momento este recurso só foi validado com instancias do módulo flask_caching.
 
@@ -72,8 +73,19 @@ Decorator que garante o envio de uma api-key na requisição. O decorator recebe
 
 ### requires_access_token
 
-Decorator que garante o envio de um access_token na requisição. O decorator recebe um parâmetro opcional que é a lista de permissões internas exigidas para o usuários solicitante acessar o endpoint. Estas permissões serão aplicadas somente ao endpoint decorado.
+Decorator que garante o envio de um access_token na requisição. O decorator recebe um parâmetro opcional que é a lista de permissões internas (`user_ionternal_permissions`) exigidas para o usuários solicitante acessar o endpoint. Este decorator também aceita permissões por escopo, permitindo passar as permissões necessárias dentro de um dado escopo (tenant, grupo empresarial, empresa ou estabelecimento), além do dado escopo. As permissões serão aplicadas somente ao endpoint decorado.
 
 ### requires_api_key_or_access_token
 
 Decorator que implementa os dois fluxos de autenticação disponíveis (api-key e access_token). Importante notar que neste fluxo o primeiro parâmetro verificado é api-key e caso este seja autorizado o acesso é garantido, independente do access_token enviado.
+
+## Acessar dados do usuário
+
+Os dados do usuário estão disponíveis no contexto da aplicação Flask.
+
+```python
+from flask import g
+
+user_profile = g.profile
+
+```

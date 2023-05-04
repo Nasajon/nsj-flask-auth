@@ -2,6 +2,7 @@ from typing import Dict
 import unittest
 import requests
 
+
 class TestNsjFlaskAuth(unittest.TestCase):
 
     def __init__(self, methodName: str = ...) -> None:
@@ -10,7 +11,7 @@ class TestNsjFlaskAuth(unittest.TestCase):
         self.access_token: str
         self.base_params: Dict
         self.base_headers: Dict
-    
+
     @classmethod
     def setUpClass(self):
         self.url_base = "http://localhost:5000"
@@ -26,36 +27,40 @@ class TestNsjFlaskAuth(unittest.TestCase):
         }
 
     @classmethod
-    def get_access_token(self, email = 'wallacepinho@nasajon.com.br', password = '123456'):
-            url = 'https://auth.dev.nasajonsistemas.com.br/auth/realms/DEV/protocol/openid-connect/token'
-            headers = {
-                "Content-Type": "application/x-www-form-urlencoded"
-            }
-            body = {
-                "client_id": "erp_api",
-                "username": email,
-                "password": password,
-                "grant_type": "password",
-                "scope": "offline_access"
-            }
-            response = requests.post(url=url, headers=headers, data=body)
-            return response.json()["access_token"]
+    def get_access_token(self, email='wallacepinho@nasajon.com.br', password='123456'):
+        url = 'https://auth.dev.nasajonsistemas.com.br/auth/realms/DEV/protocol/openid-connect/token'
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        body = {
+            "client_id": "erp_api",
+            "username": email,
+            "password": password,
+            "grant_type": "password",
+            "scope": "offline_access"
+        }
+        response = requests.post(url=url, headers=headers, data=body)
+        return response.json()["access_token"]
 
     def test_aaaaa(self):
         response = requests.get(self.url_base + "/ping/")
         self.assertEqual(response.status_code, 200)
-    
+
     def test_escopo_estabelecimento(self):
-        response = requests.get(self.url_base + "/escopo-estabelecimento/", params=self.base_params, headers=self.base_headers)
+        response = requests.get(self.url_base + "/escopo-estabelecimento/",
+                                params=self.base_params, headers=self.base_headers)
         self.assertEqual(response.status_code, 200)
 
     def test_escopo_empresa(self):
-        response = requests.get(self.url_base + "/escopo-empresa/", params=self.base_params, headers=self.base_headers)
+        response = requests.get(self.url_base + "/escopo-empresa/",
+                                params=self.base_params, headers=self.base_headers)
         self.assertEqual(response.status_code, 200)
 
     def test_escopo_grupo_empresarial(self):
-        response = requests.get(self.url_base + "/escopo-grupo-empresarial/", params=self.base_params, headers=self.base_headers)
+        response = requests.get(self.url_base + "/escopo-grupo-empresarial/",
+                                params=self.base_params, headers=self.base_headers)
         self.assertEqual(response.status_code, 200)
+
 
 if __name__ == '__main__':
     unittest.main()

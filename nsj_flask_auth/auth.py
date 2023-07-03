@@ -10,6 +10,7 @@ from flask import request, abort, jsonify, g
 
 from nsj_flask_auth.caching import Caching
 from nsj_flask_auth.exceptions import Forbidden, MissingAuthorizationHeader, Unauthorized
+from nsj_flask_auth.settings import log_time
 
 
 class Scope(Enum):
@@ -144,6 +145,7 @@ class Auth:
 
         return
 
+    @log_time('Pegar profile do diretório')
     def _get_user_profile_diretorio(self, email):
         user_profile = None
 
@@ -277,6 +279,7 @@ class Auth:
             user_internal_permissions, scope, user_scope_permissions
         )
 
+    @log_time('Pegar profile a partir do access token')
     def _get_user_profile(self, access_token):
 
         if self._cache:
@@ -297,7 +300,8 @@ class Auth:
             self._cache.set(access_token, response.json())
 
         return response.json()
-
+    
+    @log_time('Pegar profile a partir da apikey')
     def _get_app_profile(self, api_key):
 
         if self._cache:
@@ -324,6 +328,7 @@ class Auth:
 
         return response.json()
 
+    @log_time('Pegar permissões por funções')
     def _get_permissions_by_function(self, function_id):
 
         permissions = None

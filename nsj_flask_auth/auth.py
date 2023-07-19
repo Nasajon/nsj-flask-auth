@@ -1,3 +1,4 @@
+import os
 import logging
 import requests
 
@@ -9,7 +10,7 @@ from urllib.parse import urljoin
 from flask import request, abort, jsonify, g
 
 from nsj_flask_auth.caching import Caching
-from nsj_flask_auth.exceptions import Forbidden, MissingAuthorizationHeader, Unauthorized
+from nsj_flask_auth.exceptions import Forbidden, MissingAuthorizationHeader, Unauthorized, InternalUnauthorized
 from nsj_flask_auth.settings import log_time
 
 
@@ -72,7 +73,11 @@ class Auth:
         self._app_required_permissions = app_required_permissions
         if caching_service:
             self._cache = Caching(caching_service)
-        self._logger = logging.getLogger(app_name)
+        
+        if "APP_NAME" in os.environ:
+            self._logger = logging.getLogger(os.environ["APP_NAME"])
+        else:
+            self._logger = logging.getLogger(app_name)
 
     def _verify_api_key(self, app_required_permissions: List = None):
         api_key = request.headers.get(self._api_key_header)
@@ -157,8 +162,13 @@ class Auth:
             headers = {"apikey": self._diretorio_api_key}
             response = requests.get(url, headers=headers)
 
-            if response.status_code != 200:
-                raise Exception("A api-key do sistema não é válida")
+            if response.status_code == 404:
+                pass
+            elif response.status_code == 401 or response.status_code == 403:
+                raise InternalUnauthorized("A api-key do sistema não é válida")
+            elif response.status_code != 200:
+                raise Exception(f"Erro desconhecido na recuperação do profile: {response.status_code}. Mensagem: {response.content.decode()}. URL: {url}")
+
         if user_profile:
             return user_profile
 
@@ -167,8 +177,10 @@ class Auth:
 
         response = requests.get(url, headers=headers)
 
-        if response.status_code != 200:
-            raise Exception("A api-key do sistema não é válida")
+        if response.status_code == 401 or response.status_code == 403:
+            raise InternalUnauthorized("A api-key do sistema não é válida")
+        elif response.status_code != 200:
+            raise Exception(f"Erro desconhecido na recuperação do profile: {response.status_code}. Mensagem: {response.content.decode()}. URL: {url}")
 
         user_profile = response.json()
 
@@ -320,8 +332,10 @@ class Auth:
 
         response = requests.post(url, data=data, headers=headers)
 
-        if response.status_code != 200:
-            raise Unauthorized("A api-key do sistema não é válida")
+        if response.status_code == 401 or response.status_code == 403:
+            raise InternalUnauthorized("A api-key do sistema não é válida")
+        elif response.status_code != 200:
+            raise Exception(f"Erro desconhecido na validação do profile: {response.status_code}. Mensagem: {response.content.decode()}")
 
         if self._cache:
             self._cache.set(api_key, response.json())
@@ -345,8 +359,10 @@ class Auth:
             headers = {"apikey": self._diretorio_api_key}
             response = requests.get(url, headers=headers)
 
-            if response.status_code != 200:
-                raise Unauthorized("A api-key do sistema não é válida")
+            if response.status_code == 401 or response.status_code == 403:
+                raise InternalUnauthorized("A api-key do sistema não é válida")
+            elif response.status_code != 200:
+                raise Exception(f"Erro desconhecido na recuperação das permissões do profile: {response.status_code}. Mensagem: {response.content.decode()}")
 
             permissions = response.json()
 
@@ -389,6 +405,8 @@ class Auth:
                     return self._format_erro(401, f"{e}")
                 except Unauthorized as e:
                     return self._format_erro(401, f"{e}")
+                except InternalUnauthorized as e:
+                    return self._format_erro(500, f"{e}")
                 except Exception as e:
                     self._logger.exception(
                         f"Erro na autenticação/autorização. Mensagem: {e}")
@@ -427,6 +445,8 @@ class Auth:
                     return self._format_erro(401, f"{e}")
                 except Unauthorized as e:
                     return self._format_erro(401, f"{e}")
+                except InternalUnauthorized as e:
+                    return self._format_erro(500, f"{e}")
                 except Exception as e:
                     self._logger.exception(
                         f"Erro na autenticação/autorização. Mensagem: {e}")
@@ -465,6 +485,8 @@ class Auth:
                     return self._format_erro(401, f"{e}")
                 except Unauthorized as e:
                     return self._format_erro(401, f"{e}")
+                except InternalUnauthorized as e:
+                    return self._format_erro(500, f"{e}")
                 except Exception as e:
                     self._logger.exception(
                         f"Erro na autenticação/autorização. Mensagem: {e}")

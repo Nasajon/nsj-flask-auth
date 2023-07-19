@@ -8,3 +8,6 @@ class Unauthorized(Exception):
 
 class Forbidden(Exception):
     pass
+
+class InternalUnauthorized(Exception):
+    pass

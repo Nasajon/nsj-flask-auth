@@ -156,21 +156,8 @@ class Auth:
 
         if self._cache:
             user_profile = self._cache.get(email)
-
-        if not user_profile:
-            url = self._diretorio_base_uri + "/profile/" + email
-            headers = {"apikey": self._diretorio_api_key}
-            response = requests.get(url, headers=headers)
-
-            if response.status_code == 404:
-                pass
-            elif response.status_code == 401 or response.status_code == 403:
-                raise InternalUnauthorized("A api-key do sistema não é válida")
-            elif response.status_code != 200:
-                raise Exception(f"Erro desconhecido na recuperação do profile: {response.status_code}. Mensagem: {response.content.decode()}. URL: {url}")
-
-        if user_profile:
-            return user_profile
+            if user_profile:
+                return user_profile
 
         url = urljoin(self._diretorio_base_uri, f"/v2/api/profile/{email}")
         headers = {"apikey": self._diretorio_api_key}

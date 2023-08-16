@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "nsj-flask-auth"
-version = "0.5.6"
+version = "0.5.7"
 description = "Modulo básico para autenticação de aplicações Flask no contexto da Nasajon"
 authors = ["Lucas Assis <lucasassis@nasajon.com.br>", "Sergio Silva <sergiosilva@nasajon.com.br>"]
 

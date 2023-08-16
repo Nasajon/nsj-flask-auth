@@ -286,10 +286,11 @@ class Auth:
             if user_profile:
                 return user_profile
 
+        access_token_bearer = access_token
         if "Bearer " not in access_token:
-            access_token = "Bearer " + access_token
+            access_token_bearer = "Bearer " + access_token
 
-        headers = {"Authorization": access_token}
+        headers = {"Authorization": access_token_bearer}
         response = requests.get(self._profile_uri, headers=headers)
 
         if response.status_code != 200:

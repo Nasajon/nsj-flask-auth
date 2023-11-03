@@ -24,6 +24,11 @@ def teste__permissao_escopo_tenant():
 def teste__permissao_escopo_grupo_empresarial():
     return ({}, 200, {})
 
+@app.route("/escopo-grupo-empresarial/instalacao/", methods=["GET", "POST"])
+@auth.requires_instalacao_key(scope=Scope.GRUPO_EMPRESARIAL, user_scope_permissions=["acesso_total"])
+def teste__permissao_escopo_grupo_empresarial():
+    return ({}, 200, {})
+
 @app.route("/escopo-empresa/", methods=["GET", "POST"])
 @auth.requires_access_token(scope=Scope.EMPRESA, user_scope_permissions=["acesso_total"])
 def teste__permissao_escopo_empresa():

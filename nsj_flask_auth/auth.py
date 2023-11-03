@@ -53,6 +53,7 @@ class Auth:
         profile_uri: str = None,
         diretorio_api_key: str = None,
         api_key_header: str = "X-API-Key",
+        api_instalacao_header: str = "apikey",
         access_token_header: str = "Authorization",
         user_internal_permissions: list = [],
         user_tenant_permissions: list = [],
@@ -66,6 +67,7 @@ class Auth:
         self._profile_uri = profile_uri
         self._diretorio_api_key = diretorio_api_key
         self._api_key_header = api_key_header
+        self._api_instalacao_header = api_instalacao_header
         self._access_token_header = access_token_header
         self._user_internal_permissions = user_internal_permissions
         self._scope: Scope = scope
@@ -97,6 +99,25 @@ class Auth:
             return
 
         raise Unauthorized("Somente api-keys de sistema são válidas")
+    
+    def _verify_instalacao_key(self, app_required_permissions: List = None):
+        instalacao_key = request.headers.get(self._api_instalacao_header)
+
+        if not instalacao_key:
+            raise MissingAuthorizationHeader(
+                f"Missing {self._api_instalacao_header} header")
+
+        app_profile = self._get_app_profile_by_instalacao(instalacao_key)
+
+        if app_profile.get("tipo") == "instalacao":
+            g.profile = {
+                "nome": "Instalação",
+                "email": "",
+                "authentication_type": "instalacao",
+            }
+            return
+
+        raise Unauthorized("Instalações não são válidas")
 
     def _verify_access_token(
         self,
@@ -277,6 +298,20 @@ class Auth:
         self._verify_access_token(
             user_internal_permissions, scope, user_scope_permissions
         )
+        
+    def _verify_api_key_or_instalacao_key(
+        self,
+        app_required_permissions: list = None
+    ):
+        try:
+            self._verify_api_key(app_required_permissions)
+            return
+        except MissingAuthorizationHeader:
+            pass
+
+        self._verify_instalacao_key(
+            app_required_permissions
+        )
 
     @log_time('Pegar profile a partir do access token')
     def _get_user_profile(self, access_token):
@@ -327,6 +362,35 @@ class Auth:
 
         if self._cache:
             self._cache.set(api_key, response.json())
+
+        return response.json()
+
+    @log_time('Pegar profile a partir da instalação')
+    def _get_app_profile_by_instalacao(self, instalacao):
+
+        if self._cache:
+            app_profile = self._cache.get(instalacao)
+            if app_profile:
+                return app_profile
+
+        data = f"apikey={instalacao}"
+
+        headers = {
+            "apikey": self._diretorio_api_key,
+            "Content-Type": "application/x-www-form-urlencoded",
+        }
+
+        url = urljoin(self._diretorio_base_uri, "v2/api/validate")
+
+        response = requests.post(url, data=data, headers=headers)
+
+        if response.status_code == 401 or response.status_code == 403:
+            raise InternalUnauthorized("A instalação do sistema não é válida")
+        elif response.status_code != 200:
+            raise Exception(f"Erro desconhecido na validação do profile: {response.status_code}. Mensagem: {response.content.decode()}")
+
+        if self._cache:
+            self._cache.set(instalacao, response.json())
 
         return response.json()
 
@@ -386,6 +450,66 @@ class Auth:
             def wrapper(*args, **kwargs):
                 try:
                     self._verify_api_key(app_required_permissions)
+                    return func(*args, **kwargs)
+                except Forbidden as e:
+                    return self._format_erro(403, f"{e}")
+                except MissingAuthorizationHeader as e:
+                    return self._format_erro(401, f"{e}")
+                except Unauthorized as e:
+                    return self._format_erro(401, f"{e}")
+                except InternalUnauthorized as e:
+                    return self._format_erro(500, f"{e}")
+                except Exception as e:
+                    self._logger.exception(
+                        f"Erro na autenticação/autorização. Mensagem: {e}")
+                    return self._format_erro(500, f"{e}")
+
+            return wrapper
+
+        return decorator
+
+    def requires_instalacao_key(self, app_required_permissions: List = None):
+        """Decorador que garante o envio de uma instalacao-key válida. Caso não seja enviada ou seja
+        enviado uma instalacao-key inválida, a chamada será automaticamente abortada. A parametrização
+        da mensagem de erro ainda não está disponível. O decorador também aceita como parametro
+        uma lista de permissões que o sistema deve ter para acessar o recurso. Esta lista trabalha
+        em adição a lista fornceida na inicialização da classe.
+        """
+
+        def decorator(func):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                try:
+                    self._verify_instalacao_key(app_required_permissions)
+                    return func(*args, **kwargs)
+                except Forbidden as e:
+                    return self._format_erro(403, f"{e}")
+                except MissingAuthorizationHeader as e:
+                    return self._format_erro(401, f"{e}")
+                except Unauthorized as e:
+                    return self._format_erro(401, f"{e}")
+                except InternalUnauthorized as e:
+                    return self._format_erro(500, f"{e}")
+                except Exception as e:
+                    self._logger.exception(
+                        f"Erro na autenticação/autorização. Mensagem: {e}")
+                    return self._format_erro(500, f"{e}")
+
+            return wrapper
+
+        return decorator
+
+    def requires_api_key_or_instalacao_key(self, app_required_permissions: List = None):
+        """Fluxo que implementa os decoradores requires_instalacao_key e requires_api_key.
+        Neste fluxo, caso seja enviado na mesma requisição um instalacao key e uma api key,
+        primeiro é validado o api-key e se for válido, o access token é ignorado.
+        """
+
+        def decorator(func):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                try:
+                    self._verify_api_key_or_instalacao_key(app_required_permissions)
                     return func(*args, **kwargs)
                 except Forbidden as e:
                     return self._format_erro(403, f"{e}")

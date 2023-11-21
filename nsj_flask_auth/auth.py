@@ -294,6 +294,8 @@ class Auth:
             return
         except MissingAuthorizationHeader:
             pass
+        except Unauthorized:
+            pass
 
         self._verify_access_token(
             user_internal_permissions, scope, user_scope_permissions
@@ -307,6 +309,8 @@ class Auth:
             self._verify_api_key(app_required_permissions)
             return
         except MissingAuthorizationHeader:
+            pass
+        except Unauthorized:
             pass
 
         self._verify_instalacao_key(

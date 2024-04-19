@@ -7,3 +7,6 @@ build_pkg:
 
 upload_pkg:
 	python3 -m twine upload --skip-existing dist/*
+
+run_tests_srv:
+	flask --app tests/api_test.py run

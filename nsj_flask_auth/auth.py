@@ -1,3 +1,4 @@
+# pylint: disable=C0301, C0114, C0115, W0718, W0719, W1203, W3101, C0415, W102, C0411
 import os
 import logging
 import requests
@@ -20,6 +21,10 @@ class Scope(Enum):
     EMPRESA = 2
     ESTABELECIMENTO = 3
 
+class ProfileVendor(Enum):
+    DIRETORIO = 1
+    NSJ_AUTH_API = 2
+
 
 class Auth:
     """Esta classe é responsável por disponibilizar um fluxo básico de autenticação através
@@ -32,6 +37,12 @@ class Auth:
     profile_uri: url do endpoint que retorna o perfil do usuário.
 
     diretorio_api_key: chave de acesso da sua aplicação.
+
+    profile_vendor: Determina qual a api de profile utilizar, Diretório ou nsj-authorization-api.
+
+    nsj_auth_api_url: Url base da nsj-authorization-api.
+
+    nsj_auth_api_token: Token  da nsj-authorization-api.
 
     Recomenda-se instanciar a classe em um arquivo próprio e importar sua instância a partir dele.
 
@@ -61,7 +72,10 @@ class Auth:
         caching_service=None,
         scope: Scope = Scope.GRUPO_EMPRESARIAL,
         user_scope_permissions: List = [],
-        app_name="app"
+        app_name="app",
+        profile_vendor: ProfileVendor = ProfileVendor.DIRETORIO,
+        nsj_auth_api_url: str = None,
+        nsj_auth_api_token: str = None
     ):
         self._diretorio_base_uri = diretorio_base_uri
         self._profile_uri = profile_uri
@@ -73,9 +87,14 @@ class Auth:
         self._scope: Scope = scope
         self._user_scope_permissions = user_scope_permissions
         self._app_required_permissions = app_required_permissions
+        self._user_tenant_permissions = user_tenant_permissions
+        self._profile_vendor = profile_vendor
+        self._nsj_auth_api_url = nsj_auth_api_url
+        self._nsj_auth_api_token = nsj_auth_api_token
+
         if caching_service:
             self._cache = Caching(caching_service)
-        
+
         if "APP_NAME" in os.environ:
             self._logger = logging.getLogger(os.environ["APP_NAME"])
         else:
@@ -99,7 +118,7 @@ class Auth:
             return
 
         raise Unauthorized("Somente api-keys de sistema são válidas")
-    
+
     def _verify_instalacao_key(self, app_required_permissions: List = None):
         instalacao_key = request.headers.get(self._api_instalacao_header)
 
@@ -197,9 +216,57 @@ class Auth:
 
         return user_profile
 
+    @log_time('Pegar profile do nsj auth api')
+    def _get_user_profile_auth_api(self, email):
+        user_profile = None
+
+        if self._cache:
+            user_profile = self._cache.get(email)
+            if user_profile:
+                return user_profile
+
+        if self._nsj_auth_api_url is None:
+            raise Exception("Url da api de profile não foi definida.")
+
+        if self._nsj_auth_api_token is None:
+            raise Exception("Token da api de profile não foi definido.")
+
+        access_token_basic = self._nsj_auth_api_token
+        if "Basic " not in access_token_basic:
+            access_token_basic = "Basic " + access_token_basic
+
+        headers = {"Authorization": access_token_basic}
+
+        url = urljoin(self._nsj_auth_api_url, f"/authorization/api/profile/{email}")
+
+        response = requests.get(url, headers=headers)
+
+        if response.status_code == 401 or response.status_code == 403:
+            raise InternalUnauthorized("O token de autenticação não é válido.")
+        elif response.status_code != 200:
+            raise Exception(f"Erro desconhecido na recuperação do profile: {response.status_code}. Mensagem: {response.content.decode()}. URL: {url}")
+
+        user_profile = response.json()
+
+        if self._cache:
+            self._cache.set(email, user_profile)
+
+        return user_profile
+
+    def _get_user_profile_vendor(self, email):
+
+        match self._profile_vendor:
+            case ProfileVendor.DIRETORIO:
+                return self._get_user_profile_diretorio(email)
+            case ProfileVendor.NSJ_AUTH_API:
+                return self._get_user_profile_auth_api(email)
+            case _:
+                raise Exception(f"Profile inválido: {str(self._profile_vendor)}.")
+
+
     def _verify_user_permissions(self, user_internal_permissions: List, email: str):
 
-        user_profile = self._get_user_profile_diretorio(email)
+        user_profile = self._get_user_profile_vendor(email)
 
         if not user_internal_permissions:
             return user_profile
@@ -216,7 +283,7 @@ class Auth:
     def _verify_permission_by_scope(
         self, permissions: List, email: str, scope: Scope = Scope.GRUPO_EMPRESARIAL
     ):
-        user_profile = self._get_user_profile_diretorio(email)
+        user_profile = self._get_user_profile_vendor(email)
 
         entity_scope_id = self._get_entity_scope_id_from_request(scope)
 
@@ -300,7 +367,7 @@ class Auth:
         self._verify_access_token(
             user_internal_permissions, scope, user_scope_permissions
         )
-        
+
     def _verify_api_key_or_instalacao_key(
         self,
         app_required_permissions: list = None
@@ -339,7 +406,7 @@ class Auth:
             self._cache.set(access_token, response.json())
 
         return response.json()
-    
+
     @log_time('Pegar profile a partir da apikey')
     def _get_app_profile(self, api_key):
 

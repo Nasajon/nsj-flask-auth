@@ -63,6 +63,15 @@ Esta é a implementação mínima do módulo. Mais detalhes sobre parametrizaç�
 * APP_REQUIRED_PERMISSIONS: lista de permissões que o sistema precisa para acessar os endpoints da aplicação.
 * CACHING_SERVICE: instancia do serviço de cache. Até o momento este recurso só foi validado com instancias do módulo flask_caching.
 
+* PROFILE_VENDOR: Determina qual a api de profile usar, podendo ser `DIRETORIO` para o profile do [Diretório](https://github.com/Nasajon/Diretorio/blob/master/docs/Perfil/profile.md)  ou
+`NSJ_AUTH_API` para a [nova api de profile](https://github.com/Nasajon/nsj-authorization-api).
+
+* NSJ_AUTH_API_URL: Caso se use `NSJ_AUTH_API` para o parâmetro **PROFILE_VENDOR**, informar a [url base](https://github.com/Nasajon/nsj-authorization-api?tab=readme-ov-file#endpoint-principal) da api.
+
+* NSJ_AUTH_API_TOKEN: Caso se use `NSJ_AUTH_API` para o parâmetro **PROFILE_VENDOR**, informar o [token de autenticação](https://github.com/Nasajon/nsj-authorization-api?tab=readme-ov-file#endpoint-principal) da api.
+
+
+
 Caso alguma permissão seja informada no momento de inicialização da classe é importante notar que ela será aplicada a todos os endpoints que forem decorados pelos métodos disponíves na classe Auth.
 
 ## Métodos disponíveis

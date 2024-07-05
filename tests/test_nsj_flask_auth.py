@@ -1,3 +1,4 @@
+# pylint: disable=C0301, C0114, C0115, C0116, W0718, W0719, W1203, W3101, C0415, C0411, C0202
 from typing import Dict
 import unittest
 import requests
@@ -28,7 +29,7 @@ class TestNsjFlaskAuth(unittest.TestCase):
 
     @classmethod
     def get_access_token(self, email='wallacepinho@nasajon.com.br', password='123456'):
-        url = 'https://auth.dev.nasajonsistemas.com.br/auth/realms/DEV/protocol/openid-connect/token'
+        url = 'https://auth.nasajon.dev/auth/realms/DEV/protocol/openid-connect/token'
         headers = {
             "Content-Type": "application/x-www-form-urlencoded"
         }
@@ -58,6 +59,23 @@ class TestNsjFlaskAuth(unittest.TestCase):
 
     def test_escopo_grupo_empresarial(self):
         response = requests.get(self.url_base + "/escopo-grupo-empresarial/",
+                                params=self.base_params, headers=self.base_headers)
+        self.assertEqual(response.status_code, 200)
+
+    ###################################################################################
+
+    def test_escopo_estabelecimento_nova_api(self):
+        response = requests.get(self.url_base + "/escopo-estabelecimento-nova-api/",
+                                params=self.base_params, headers=self.base_headers)
+        self.assertEqual(response.status_code, 200)
+
+    def test_escopo_empresa_nova_api(self):
+        response = requests.get(self.url_base + "/escopo-empresa-nova-api/",
+                                params=self.base_params, headers=self.base_headers)
+        self.assertEqual(response.status_code, 200)
+
+    def test_escopo_grupo_empresarial_nova_api(self):
+        response = requests.get(self.url_base + "/escopo-grupo-empresarial-nova-api/",
                                 params=self.base_params, headers=self.base_headers)
         self.assertEqual(response.status_code, 200)
 

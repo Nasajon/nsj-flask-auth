@@ -1,3 +1,5 @@
+.PHONY: help install install_to_pkg build_pkg upload_pkg run_tests_srv tests
+
 install_to_pkg:
 	pip install build
 	pip install twine
@@ -10,3 +12,6 @@ upload_pkg:
 
 run_tests_srv:
 	flask --app tests/api_test.py run
+
+tests:
+	pytest tests/api_test.py

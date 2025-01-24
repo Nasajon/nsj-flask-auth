@@ -72,6 +72,35 @@ def teste__permissao_escopo_empresa_nova_api():
 def teste__permissao_escopo_estabelecimento_nova_api():
     return ({}, 200, {})
 
+# Suportando  tenant
+
+auth2 = Auth(
+    diretorio_base_uri="https://dir.nasajon.dev",
+    profile_uri="https://auth.nasajon.dev/auth/realms/DEV/protocol/openid-connect/userinfo",
+    diretorio_api_key="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ0aXBvIjoidGVuYW50IiwidGVuYW50X2lkIjo0N30.23lby0xyLW5vEOB_0y_vnVveAQGd42AGaXCBoxEcDZo",
+)
+
+@app.route("/escopo-tenant-nova-api/", methods=["GET", "POST"])
+@auth2.requires_access_token(scope=Scope.TENANT, user_scope_permissions=["efetivar_funcionario"])
+def teste__permissao_escopo_tenant_token_tenant():
+    return ({}, 200, {})
+
+@app.route("/escopo-grupo-empresarial-nova-api/", methods=["GET", "POST"])
+@auth2.requires_access_token(scope=Scope.GRUPO_EMPRESARIAL, user_scope_permissions=["efetivar_funcionario"])
+def teste__permissao_escopo_grupo_empresarial_token_tenant():
+    return ({}, 200, {})
+
+
+@app.route("/escopo-empresa-nova-api/", methods=["GET", "POST"])
+@auth2.requires_access_token(scope=Scope.EMPRESA, user_scope_permissions=["efetivar_funcionario"])
+def teste__permissao_escopo_empresa_token_tenant():
+    return ({}, 200, {})
+
+@app.route("/escopo-estabelecimento-nova-api/", methods=["GET", "POST"])
+@auth2.requires_access_token(scope=Scope.ESTABELECIMENTO, user_scope_permissions=["efetivar_funcionario"])
+def teste__permissao_escopo_estabelecimento_token_tenant():
+    return ({}, 200, {})
+
 
 if __name__ == '__main__':
     app.run(port=5000)

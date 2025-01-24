@@ -117,7 +117,16 @@ class Auth:
             }
             return
 
-        raise Unauthorized("Somente api-keys de sistema são válidas")
+        if app_profile.get("tipo") == "tenant":
+            g.profile = {
+                "nome": app_profile["codigo"],
+                "email": "",
+                "tenant": app_profile["tenant"].get("id"),
+                "authentication_type": "api_key",
+            }
+            return
+
+        raise Unauthorized("Somente api-keys de sistema/tenant são válidas")
 
     def _verify_instalacao_key(self, app_required_permissions: List = None):
         instalacao_key = request.headers.get(self._api_instalacao_header)

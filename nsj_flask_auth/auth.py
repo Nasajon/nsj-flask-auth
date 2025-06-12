@@ -75,7 +75,10 @@ class Auth:
         app_name="app",
         profile_vendor: ProfileVendor = ProfileVendor.DIRETORIO,
         nsj_auth_api_url: str = None,
-        nsj_auth_api_token: str = None
+        nsj_auth_api_token: str = None,
+        introspect_url: str = None,
+        introspect_token: str = None
+        
     ):
         self._diretorio_base_uri = diretorio_base_uri
         self._profile_uri = profile_uri
@@ -91,6 +94,8 @@ class Auth:
         self._profile_vendor = profile_vendor
         self._nsj_auth_api_url = nsj_auth_api_url
         self._nsj_auth_api_token = nsj_auth_api_token
+        self._introspect_url = introspect_url
+        self._introspect_token = introspect_token
 
         if caching_service:
             self._cache = Caching(caching_service)
@@ -686,4 +691,86 @@ class Auth:
 
             return wrapper
 
+        return decorator
+    
+    def _fast_access_token_or_apikey(self, access_token: str, apikey: str):
+
+        if access_token:
+            # Validação com access_token
+            headers = {
+                "Authorization": f"Basic {self._introspect_token}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+
+            url = self._introspect_url
+
+            data = {
+                "token": access_token.replace("Bearer ", ""),
+                "token_type_hint": "access_token"
+            }
+
+        elif apikey:
+            # Validação com apikey
+            headers = {"apikey": apikey}
+            url = urljoin(self._diretorio_base_uri, "v2/api/validate")
+            data = {
+                "apikey": apikey
+            }
+
+        else:
+            raise MissingAuthorizationHeader("Missing authorization headers")
+        
+        response = requests.post(url, headers=headers, data=data)        
+
+        if response.status_code != 200:
+            raise Unauthorized("A api-key do sistema ou access token não é válido")
+        
+        response = response.json()
+
+        if response.get("active") is False:
+            raise Unauthorized("A api-key do sistema ou access token não é válido")
+
+        g.user_data = {
+            "name": response.get("name") if access_token else "unknown",
+            "email": response.get("email") if access_token else "unknown",
+            "type": "access_token" if access_token else "apikey"
+        }
+
+        return
+    
+    def fast_access_token_or_apikey(self):
+        """
+        Decorador para validar apenas o access token ou API Key, sem verificar permissões adicionais.
+        O access token é validado pela url do introspect
+        """
+        def decorator(func):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                
+                try:
+                    
+                    access_token = request.headers.get(self._access_token_header)
+                    apikey = request.headers.get(self._api_key_header)
+
+                    if not access_token and not apikey:
+                        raise MissingAuthorizationHeader("Missing authorization or X-API-KEY header")
+
+                    # Chama o método de validação que agora lida com ambos
+                    self._fast_access_token_or_apikey(access_token=access_token, apikey=apikey)
+
+                    return func(*args, **kwargs)
+                
+                except Forbidden as e:
+                    return self._format_erro(403, f"{e}")
+                except MissingAuthorizationHeader as e:
+                    return self._format_erro(401, f"{e}")
+                except Unauthorized as e:
+                    return self._format_erro(401, f"{e}")
+                except Exception as e:
+                    self._logger.exception(
+                        f"Erro na autenticação/autorização. Mensagem: {e}")
+                    return self._format_erro(500, f"{e}")
+
+            return wrapper
+        
         return decorator

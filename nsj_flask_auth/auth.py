@@ -1,5 +1,3 @@
-# pylint: disable=C0301, C0114, C0115, W0718, W0719, W1203, W3101, C0415, W102, C0411
-import os
 import logging
 import requests
 
@@ -11,8 +9,7 @@ from urllib.parse import urljoin
 from flask import request, abort, jsonify, g
 
 from nsj_flask_auth.caching import Caching
-from nsj_flask_auth.exceptions import Forbidden, MissingAuthorizationHeader, Unauthorized, InternalUnauthorized
-from nsj_flask_auth.settings import log_time
+from nsj_flask_auth.exceptions import Forbidden, MissingAuthorizationHeader, Unauthorized
 
 
 class Scope(Enum):
@@ -20,10 +17,6 @@ class Scope(Enum):
     GRUPO_EMPRESARIAL = 1
     EMPRESA = 2
     ESTABELECIMENTO = 3
-
-class ProfileVendor(Enum):
-    DIRETORIO = 1
-    NSJ_AUTH_API = 2
 
 
 class Auth:
@@ -38,12 +31,6 @@ class Auth:
 
     diretorio_api_key: chave de acesso da sua aplicação.
 
-    profile_vendor: Determina qual a api de profile utilizar, Diretório ou nsj-authorization-api.
-
-    nsj_auth_api_url: Url base da nsj-authorization-api.
-
-    nsj_auth_api_token: Token  da nsj-authorization-api.
-
     Recomenda-se instanciar a classe em um arquivo próprio e importar sua instância a partir dele.
 
     Caso tenha sido implementado um serviço de caching na aplicação é possível fornecer uma
@@ -57,6 +44,8 @@ class Auth:
     """
 
     _cache = None
+    _introspect_url = None
+    _introspect_token = None
 
     def __init__(
         self,
@@ -64,7 +53,6 @@ class Auth:
         profile_uri: str = None,
         diretorio_api_key: str = None,
         api_key_header: str = "X-API-Key",
-        api_instalacao_header: str = "X-API-Key",
         access_token_header: str = "Authorization",
         user_internal_permissions: list = [],
         user_tenant_permissions: list = [],
@@ -73,25 +61,20 @@ class Auth:
         scope: Scope = Scope.GRUPO_EMPRESARIAL,
         user_scope_permissions: List = [],
         app_name="app",
-        profile_vendor: ProfileVendor = ProfileVendor.DIRETORIO,
-        nsj_auth_api_url: str = None,
-        nsj_auth_api_token: str = None
+        introspect_url: str = None,
+        introspect_token: str = None
     ):
         self._diretorio_base_uri = diretorio_base_uri
         self._profile_uri = profile_uri
         self._diretorio_api_key = diretorio_api_key
         self._api_key_header = api_key_header
-        self._api_instalacao_header = api_instalacao_header
         self._access_token_header = access_token_header
         self._user_internal_permissions = user_internal_permissions
         self._scope: Scope = scope
         self._user_scope_permissions = user_scope_permissions
         self._app_required_permissions = app_required_permissions
-        self._user_tenant_permissions = user_tenant_permissions
-        self._profile_vendor = profile_vendor
-        self._nsj_auth_api_url = nsj_auth_api_url
-        self._nsj_auth_api_token = nsj_auth_api_token
-
+        self._introspect_url = introspect_url
+        self._introspect_token = introspect_token
         if caching_service:
             self._cache = Caching(caching_service)
 
@@ -199,14 +182,11 @@ class Auth:
 
         return
 
-    @log_time('Pegar profile do diretório')
     def _get_user_profile_diretorio(self, email):
         user_profile = None
 
         if self._cache:
             user_profile = self._cache.get(email)
-            if user_profile:
-                return user_profile
 
         url = urljoin(self._diretorio_base_uri, f"/v2/api/profile/{email}")
         headers = {"apikey": self._diretorio_api_key}
@@ -262,20 +242,9 @@ class Auth:
 
         return user_profile
 
-    def _get_user_profile_vendor(self, email):
-
-        match self._profile_vendor:
-            case ProfileVendor.DIRETORIO:
-                return self._get_user_profile_diretorio(email)
-            case ProfileVendor.NSJ_AUTH_API:
-                return self._get_user_profile_auth_api(email)
-            case _:
-                raise Exception(f"Profile inválido: {str(self._profile_vendor)}.")
-
-
     def _verify_user_permissions(self, user_internal_permissions: List, email: str):
 
-        user_profile = self._get_user_profile_vendor(email)
+        user_profile = self._get_user_profile_diretorio(email)
 
         if not user_internal_permissions:
             return user_profile
@@ -370,30 +339,11 @@ class Auth:
             return
         except MissingAuthorizationHeader:
             pass
-        except Unauthorized:
-            pass
 
         self._verify_access_token(
             user_internal_permissions, scope, user_scope_permissions
         )
 
-    def _verify_api_key_or_instalacao_key(
-        self,
-        app_required_permissions: list = None
-    ):
-        try:
-            self._verify_api_key(app_required_permissions)
-            return
-        except MissingAuthorizationHeader:
-            pass
-        except Unauthorized:
-            pass
-
-        self._verify_instalacao_key(
-            app_required_permissions
-        )
-
-    @log_time('Pegar profile a partir do access token')
     def _get_user_profile(self, access_token):
 
         if self._cache:
@@ -401,7 +351,6 @@ class Auth:
             if user_profile:
                 return user_profile
 
-        access_token_bearer = access_token
         if "Bearer " not in access_token:
             access_token_bearer = "Bearer " + access_token
 
@@ -416,7 +365,6 @@ class Auth:
 
         return response.json()
 
-    @log_time('Pegar profile a partir da apikey')
     def _get_app_profile(self, api_key):
 
         if self._cache:
@@ -445,36 +393,6 @@ class Auth:
 
         return response.json()
 
-    @log_time('Pegar profile a partir da instalação')
-    def _get_app_profile_by_instalacao(self, instalacao):
-
-        if self._cache:
-            app_profile = self._cache.get(instalacao)
-            if app_profile:
-                return app_profile
-
-        data = f"apikey={instalacao}"
-
-        headers = {
-            "apikey": self._diretorio_api_key,
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
-
-        url = urljoin(self._diretorio_base_uri, "v2/api/validate")
-
-        response = requests.post(url, data=data, headers=headers)
-
-        if response.status_code == 401 or response.status_code == 403:
-            raise InternalUnauthorized("A instalação do sistema não é válida")
-        elif response.status_code != 200:
-            raise Exception(f"Erro desconhecido na validação do profile: {response.status_code}. Mensagem: {response.content.decode()}")
-
-        if self._cache:
-            self._cache.set(instalacao, response.json())
-
-        return response.json()
-
-    @log_time('Pegar permissões por funções')
     def _get_permissions_by_function(self, function_id):
 
         permissions = None
@@ -537,68 +455,6 @@ class Auth:
                     return self._format_erro(401, f"{e}")
                 except Unauthorized as e:
                     return self._format_erro(401, f"{e}")
-                except InternalUnauthorized as e:
-                    return self._format_erro(500, f"{e}")
-                except Exception as e:
-                    self._logger.exception(
-                        f"Erro na autenticação/autorização. Mensagem: {e}")
-                    return self._format_erro(500, f"{e}")
-
-            return wrapper
-
-        return decorator
-
-    def requires_instalacao_key(self, app_required_permissions: List = None):
-        """Decorador que garante o envio de uma instalacao-key válida. Caso não seja enviada ou seja
-        enviado uma instalacao-key inválida, a chamada será automaticamente abortada. A parametrização
-        da mensagem de erro ainda não está disponível. O decorador também aceita como parametro
-        uma lista de permissões que o sistema deve ter para acessar o recurso. Esta lista trabalha
-        em adição a lista fornceida na inicialização da classe.
-        """
-
-        def decorator(func):
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                try:
-                    self._verify_instalacao_key(app_required_permissions)
-                    return func(*args, **kwargs)
-                except Forbidden as e:
-                    return self._format_erro(403, f"{e}")
-                except MissingAuthorizationHeader as e:
-                    return self._format_erro(401, f"{e}")
-                except Unauthorized as e:
-                    return self._format_erro(401, f"{e}")
-                except InternalUnauthorized as e:
-                    return self._format_erro(500, f"{e}")
-                except Exception as e:
-                    self._logger.exception(
-                        f"Erro na autenticação/autorização. Mensagem: {e}")
-                    return self._format_erro(500, f"{e}")
-
-            return wrapper
-
-        return decorator
-
-    def requires_api_key_or_instalacao_key(self, app_required_permissions: List = None):
-        """Fluxo que implementa os decoradores requires_instalacao_key e requires_api_key.
-        Neste fluxo, caso seja enviado na mesma requisição um instalacao key e uma api key,
-        primeiro é validado o api-key e se for válido, o access token é ignorado.
-        """
-
-        def decorator(func):
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                try:
-                    self._verify_api_key_or_instalacao_key(app_required_permissions)
-                    return func(*args, **kwargs)
-                except Forbidden as e:
-                    return self._format_erro(403, f"{e}")
-                except MissingAuthorizationHeader as e:
-                    return self._format_erro(401, f"{e}")
-                except Unauthorized as e:
-                    return self._format_erro(401, f"{e}")
-                except InternalUnauthorized as e:
-                    return self._format_erro(500, f"{e}")
                 except Exception as e:
                     self._logger.exception(
                         f"Erro na autenticação/autorização. Mensagem: {e}")
@@ -637,8 +493,6 @@ class Auth:
                     return self._format_erro(401, f"{e}")
                 except Unauthorized as e:
                     return self._format_erro(401, f"{e}")
-                except InternalUnauthorized as e:
-                    return self._format_erro(500, f"{e}")
                 except Exception as e:
                     self._logger.exception(
                         f"Erro na autenticação/autorização. Mensagem: {e}")
@@ -677,8 +531,6 @@ class Auth:
                     return self._format_erro(401, f"{e}")
                 except Unauthorized as e:
                     return self._format_erro(401, f"{e}")
-                except InternalUnauthorized as e:
-                    return self._format_erro(500, f"{e}")
                 except Exception as e:
                     self._logger.exception(
                         f"Erro na autenticação/autorização. Mensagem: {e}")
@@ -686,4 +538,85 @@ class Auth:
 
             return wrapper
 
+        return decorator
+    
+    def _validate_access_token_only(self, access_token: str):
+
+        token = request.headers.get(self._access_token_header)
+        apikey = request.headers.get(self._api_key_header)
+
+        if token:
+            # Validação com access_token
+            headers = {
+                "Authorization": f"Basic {self._introspect_token}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+
+            url = self._introspect_url
+
+            data = {
+                "token": access_token.replace("Bearer ", ""),
+                "token_type_hint": "access_token"
+            }
+
+        elif apikey:
+            # Validação com apikey
+            headers = {"apikey": apikey}
+            url = urljoin(self._diretorio_base_uri, "v2/api/validate")
+            data = {
+                "apikey": apikey
+            }
+
+        else:
+            raise MissingAuthorizationHeader("Missing authorization headers")
+        
+        response = requests.post(url, headers=headers, data=data)        
+
+        if response.status_code != 200:
+            raise Unauthorized("A api-key do sistema ou access token não é válido")
+        
+        response = response.json()
+
+        if response.get("active") is False:
+            raise Unauthorized("A api-key do sistema ou access token não é válido")
+
+        g.user_data = {
+            "name": response.get("name") if token else "unknown",
+            "email": response.get("email") if token else "unknown",
+            "type": "access_token" if token else "apikey"
+        }
+
+        return
+    
+    def validate_access_token_only(self):
+        """
+        Decorador para validar apenas o access token ou API Key, sem verificar permissões adicionais.
+        """
+        def decorator(func):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                try:
+                    access_token = request.headers.get(self._access_token_header)
+                    apikey = request.headers.get(self._api_key_header)
+
+                    if not access_token and not apikey:
+                        raise MissingAuthorizationHeader("Missing authorization or X-API-KEY header")
+
+                    # Chama o método de validação que agora lida com ambos
+                    self._validate_access_token_only(access_token=access_token)
+
+                    return func(*args, **kwargs)
+                
+                except Forbidden as e:
+                    return self._format_erro(403, f"{e}")
+                except MissingAuthorizationHeader as e:
+                    return self._format_erro(401, f"{e}")
+                except Unauthorized as e:
+                    return self._format_erro(401, f"{e}")
+                except Exception as e:
+                    self._logger.exception(
+                        f"Erro na autenticação/autorização. Mensagem: {e}")
+                    return self._format_erro(500, f"{e}")
+
+            return wrapper
         return decorator

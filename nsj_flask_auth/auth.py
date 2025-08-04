@@ -11,7 +11,7 @@ from urllib.parse import urljoin
 from flask import request, abort, jsonify, g
 
 from nsj_flask_auth.caching import Caching
-from nsj_flask_auth.exceptions import Forbidden, MissingAuthorizationHeader, Unauthorized, InternalUnauthorized
+from nsj_flask_auth.exceptions import Forbidden, MissingAuthorizationHeader, Unauthorized, InternalUnauthorized, UnknowAuthorizationException
 from nsj_flask_auth.settings import log_time
 
 
@@ -109,12 +109,8 @@ class Auth:
         api_key = request.headers.get(self._api_key_header)
 
         if not api_key:
-            try:
-                self._verify_system_api_key(app_required_permissions)
-                return
-            except:
-                raise MissingAuthorizationHeader(
-                    f"Missing {self._api_key_header} header")
+            self._verify_system_api_key(app_required_permissions)
+            return
 
         app_profile = self._get_app_profile(api_key)
 
@@ -213,9 +209,9 @@ class Auth:
         response = requests.get(url, headers=headers)
 
         if response.status_code == 401 or response.status_code == 403:
-            raise InternalUnauthorized("A api-key do sistema não é válida")
+            raise InternalUnauthorized("A chave recebida na autenticação basic (header Authorization) não é válida")
         elif response.status_code != 200:
-            raise Exception(f"Erro desconhecido na validação do profile: {response.status_code}. Mensagem: {response.content.decode()}")
+            raise UnknowAuthorizationException(f"Erro desconhecido na validação do profile: {response.status_code}. Mensagem: {response.content.decode()}")
 
         g.profile = self._create_profile_from_app_profile(response.json())
 
@@ -447,8 +443,8 @@ class Auth:
 
             # Se token possui 'Basic', a tentativa de validação já foi feita via apikey de sistema
             if "Basic " in access_token:
-                raise MissingAuthorizationHeader(
-                    f"Missing {self._access_token_header} header with Bearer prefix"
+                raise UnknowAuthorizationException(
+                    f"Basic auth should be handled as API Key, not as access token"
                 )
 
             access_token_bearer = "Bearer " + access_token

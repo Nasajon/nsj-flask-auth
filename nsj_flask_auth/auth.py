@@ -11,7 +11,7 @@ from urllib.parse import urljoin
 from flask import request, abort, jsonify, g
 
 from nsj_flask_auth.caching import Caching
-from nsj_flask_auth.exceptions import Forbidden, MissingAuthorizationHeader, Unauthorized, InternalUnauthorized
+from nsj_flask_auth.exceptions import Forbidden, MissingAuthorizationHeader, Unauthorized, InternalUnauthorized, UnknowAuthorizationException
 from nsj_flask_auth.settings import log_time
 
 
@@ -109,29 +109,12 @@ class Auth:
         api_key = request.headers.get(self._api_key_header)
 
         if not api_key:
-            raise MissingAuthorizationHeader(
-                f"Missing {self._api_key_header} header")
+            self._verify_system_api_key(app_required_permissions)
+            return
 
         app_profile = self._get_app_profile(api_key)
 
-        if app_profile.get("tipo") == "sistema":
-            g.profile = {
-                "nome": app_profile["sistema"].get("nome"),
-                "email": "",
-                "authentication_type": "api_key",
-            }
-            return
-
-        if app_profile.get("tipo") == "tenant":
-            g.profile = {
-                "nome": app_profile["codigo"],
-                "email": "",
-                "tenant": app_profile["tenant"].get("id"),
-                "authentication_type": "api_key",
-            }
-            return
-
-        raise Unauthorized("Somente api-keys de sistema/tenant são válidas")
+        g.profile = self._create_profile_from_app_profile(app_profile)
 
     def _verify_instalacao_key(self, app_required_permissions: List = None):
         instalacao_key = request.headers.get(self._api_instalacao_header)
@@ -203,6 +186,35 @@ class Auth:
             return
 
         return
+
+    def _verify_system_api_key(self, app_required_permissions: List = None):
+        authorization_token = request.headers.get(self._access_token_header)
+
+        # Não possui header 'Authorization'
+        if not authorization_token:
+            raise MissingAuthorizationHeader(
+                f"Missing {self._access_token_header} header"
+            )
+        
+        # Se token não possui 'Basic', a autenticação será gerida pelo validador de access token
+        if "Basic " not in authorization_token:
+            raise MissingAuthorizationHeader(
+                f"Missing {self._access_token_header} header with Basic prefix"
+            )
+
+        headers = {"Authorization": authorization_token}
+
+        url = urljoin(self._nsj_auth_api_url, f"/authorization/api/validate")
+
+        response = requests.get(url, headers=headers)
+
+        if response.status_code == 401 or response.status_code == 403:
+            raise InternalUnauthorized("A chave recebida na autenticação basic (header Authorization) não é válida")
+        elif response.status_code != 200:
+            raise UnknowAuthorizationException(f"Erro desconhecido na validação do profile: {response.status_code}. Mensagem: {response.content.decode()}")
+
+        g.profile = self._create_profile_from_app_profile(response.json())
+
 
     @log_time('Pegar profile do diretório')
     def _get_user_profile_diretorio(self, email):
@@ -277,6 +289,25 @@ class Auth:
             case _:
                 raise Exception(f"Profile inválido: {str(self._profile_vendor)}.")
 
+    def _create_profile_from_app_profile(self, app_profile: dict):
+        """ Cria objeto de profile da aplicação a partir do profile retornado pelo diretório ou nsj-authorization-api"""
+
+        if app_profile.get("tipo") == "sistema":
+            return {
+                "nome": app_profile["sistema"].get("nome"),
+                "email": "",
+                "authentication_type": "api_key",
+            }
+    
+        if app_profile.get("tipo") == "tenant":
+            return {
+                "nome": app_profile["codigo"],
+                "email": "",
+                "tenant": app_profile["tenant"].get("id"),
+                "authentication_type": "api_key",
+            }
+    
+        raise Unauthorized("Somente api-keys de sistema/tenant são válidas")
 
     def _verify_user_permissions(self, user_internal_permissions: List, email: str):
 
@@ -407,7 +438,15 @@ class Auth:
                 return user_profile
 
         access_token_bearer = access_token
+
         if "Bearer " not in access_token:
+
+            # Se token possui 'Basic', a tentativa de validação já foi feita via apikey de sistema
+            if "Basic " in access_token:
+                raise UnknowAuthorizationException(
+                    f"Basic auth should be handled as API Key, not as access token"
+                )
+
             access_token_bearer = "Bearer " + access_token
 
         headers = {"Authorization": access_token_bearer}

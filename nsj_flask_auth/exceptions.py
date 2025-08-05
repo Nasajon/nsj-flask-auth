@@ -11,3 +11,6 @@ class Forbidden(Exception):
 
 class InternalUnauthorized(Exception):
     pass
+
+class UnknowAuthorizationException(Exception):
+    pass

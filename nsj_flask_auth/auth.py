@@ -63,7 +63,8 @@ class Auth:
         diretorio_base_uri: str = None,
         profile_uri: str = None,
         diretorio_api_key: str = None,
-        api_key_header: str = "X-API-Key",
+        x_api_key_header: str = "X-API-Key",
+        api_key_header: str = "apikey",
         api_instalacao_header: str = "X-API-Key",
         access_token_header: str = "Authorization",
         user_internal_permissions: list = [],
@@ -83,6 +84,7 @@ class Auth:
         self._diretorio_base_uri = diretorio_base_uri
         self._profile_uri = profile_uri
         self._diretorio_api_key = diretorio_api_key
+        self._x_api_key_header = x_api_key_header
         self._api_key_header = api_key_header
         self._api_instalacao_header = api_instalacao_header
         self._access_token_header = access_token_header
@@ -106,7 +108,8 @@ class Auth:
             self._logger = logging.getLogger(app_name)
 
     def _verify_api_key(self, app_required_permissions: List = None):
-        api_key = request.headers.get(self._api_key_header)
+
+        api_key = request.headers.get(self._x_api_key_header) or request.headers.get(self._api_key_header)
 
         if not api_key:
             self._verify_system_api_key(app_required_permissions)
@@ -188,6 +191,7 @@ class Auth:
         return
 
     def _verify_system_api_key(self, app_required_permissions: List = None):
+        
         authorization_token = request.headers.get(self._access_token_header)
 
         # Não possui header 'Authorization'

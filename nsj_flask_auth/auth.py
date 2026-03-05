@@ -739,19 +739,36 @@ class Auth:
     def _fast_access_token_or_apikey(self, access_token: str, apikey: str):
 
         if access_token:
-            # Validação com access_token
-            headers = {
-                "Authorization": f"Basic {self._introspect_token}",
-                "Content-Type": "application/x-www-form-urlencoded"
-            }
-
-            url = self._introspect_url
-
-            data = {
-                "token": access_token.replace("Bearer ", ""),
-                "token_type_hint": "access_token"
-            }
-
+            # Se for Bearer
+            if access_token.startswith("Bearer "):
+                headers = {
+                    "Authorization": f"Basic {self._introspect_token}",
+                    "Content-Type": "application/x-www-form-urlencoded"
+                }
+                url = self._introspect_url
+                data = {
+                    "token": access_token.replace("Bearer ", ""),
+                    "token_type_hint": "access_token"
+                }
+                request_method = "post"
+            # Se for Basic
+            elif access_token.startswith("Basic "):
+                headers = {"Authorization": access_token}
+                url = urljoin(self._nsj_auth_api_url, "/authorization/api/validate")
+                data = None
+                request_method = "get"
+            else:
+                # Tenta como Bearer se não tiver prefixo
+                headers = {
+                    "Authorization": f"Basic {self._introspect_token}",
+                    "Content-Type": "application/x-www-form-urlencoded"
+                }
+                url = self._introspect_url
+                data = {
+                    "token": access_token,
+                    "token_type_hint": "access_token"
+                }
+                request_method = "post"
         elif apikey:
             # Validação com apikey
             headers = {"apikey": apikey}
@@ -759,26 +776,33 @@ class Auth:
             data = {
                 "apikey": apikey
             }
-
+            request_method = "post"
         else:
             raise MissingAuthorizationHeader("Missing authorization headers")
-        
-        response = requests.post(url, headers=headers, data=data)        
+
+        if request_method == "post":
+            response = requests.post(url, headers=headers, data=data)
+        else:
+            response = requests.get(url, headers=headers)
 
         if response.status_code != 200:
-            raise Unauthorized("A api-key do sistema ou access token não é válido")
-        
-        response = response.json()
+            raise Unauthorized("A api-key do sistema, access token ou basic não é válido")
 
-        if response.get("active") is False:
+        response_json = response.json()
+
+        # Para introspect (Bearer), espera campo 'active'. Para basic/apikey, espera status 200
+        if request_method == "post" and data is not None and response_json.get("active") is False:
             raise Unauthorized("A api-key do sistema ou access token não é válido")
 
         g.user_data = {
-            "name": response.get("name") if access_token else "unknown",
-            "email": response.get("email") if access_token else "unknown",
-            "type": "access_token" if access_token else "apikey"
+            "name": response_json.get("name") if access_token else "unknown",
+            "email": response_json.get("email") if access_token else "unknown",
+            "type": (
+                "access_token" if access_token and (access_token.startswith("Bearer ") or not access_token.startswith("Basic "))
+                else "basic" if access_token and access_token.startswith("Basic ")
+                else "apikey"
+            )
         }
-
         return
     
     def fast_access_token_or_apikey(self):

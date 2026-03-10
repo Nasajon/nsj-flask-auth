@@ -13,6 +13,8 @@ from flask import request, abort, jsonify, g
 from nsj_flask_auth.caching import Caching
 from nsj_flask_auth.exceptions import Forbidden, MissingAuthorizationHeader, Unauthorized, InternalUnauthorized, UnknowAuthorizationException
 from nsj_flask_auth.settings import log_time
+import base64
+import time
 
 
 class Scope(Enum):
@@ -77,7 +79,8 @@ class Auth:
         nsj_auth_api_url: str = None,
         nsj_auth_api_token: str = None,
         introspect_url: str = None,
-        introspect_token: str = None
+        introspect_token: str = None,
+        erp_token_validation_url: str = None,
         
     ):
         self._diretorio_base_uri = diretorio_base_uri
@@ -96,6 +99,7 @@ class Auth:
         self._nsj_auth_api_token = nsj_auth_api_token
         self._introspect_url = introspect_url
         self._introspect_token = introspect_token
+        self.erp_token_validation_url = erp_token_validation_url
 
         if caching_service:
             self._cache = Caching(caching_service)
@@ -879,3 +883,92 @@ class Auth:
                 raise Forbidden(
                     f"Acesso negado. Usuário não possui permissão para o tenant {tenant_from_request}"
                 )
+                
+    def _requires_erp_sql_key(self):
+    
+        try:
+            # 1. Extrai e decodifica o Header (CNPJ:TOKEN)
+            token_header = request.headers.get("X-ERP-SQL-KEY")
+            
+            if not token_header:
+                raise MissingAuthorizationHeader("Missing X-ERP-SQL-KEY header")
+
+            header_auth = base64.b64decode(token_header).decode('utf-8')
+            parts = header_auth.split(':')
+            
+            if len(parts) < 2:
+                raise Unauthorized("Formato inválido do header. Esperado base64(CNPJ:TOKEN)")
+
+            cnpj = parts[0]
+            token = parts[1]
+
+            # 2. Sincronização de Tempo (Janela de 1 hora)
+            timestamp_hora = int(time.time() // 3600) * 3600
+
+            # 3. Normalização da URL
+            url = request.url.strip().rstrip('/')
+            
+            # 4. Processamento do Body como TEXTO BRUTO
+            body_raw = request.get_data(as_text=True) or ""
+            
+            # REMOVE TODOS os espaços em branco para evitar problemas de formatação
+            body_normalized = "".join(body_raw.split())
+            body_part = body_normalized[:500]
+            
+            # 5. Encapsula para a API de autorização
+            data = {
+                'cnpj': cnpj,
+                'token': token,
+                'url': url,
+                'timestamp_hora': timestamp_hora,
+                'body_part': body_part
+            }
+            
+            headers = {
+                "X-ERP-SQL-KEY": token
+            }            
+            
+            # 6. Chamada HTTP para validação no Service
+            response = requests.post(
+                url=self.erp_token_validation_url, 
+                headers=headers, 
+                json=data,
+                timeout=5
+            )
+            
+            if response.status_code != 200:
+                raise Unauthorized("Token ERP SQL inválido ou expirado")
+                
+        except Exception as e:
+            self._logger.exception(f"Erro na autenticação ERP SQL: {e}")
+            raise Unauthorized("Chave de acesso inválida")
+        
+
+
+    def requires_erp_sql_key(self):
+        """
+        Decorador para validar a chave de acesso específica para o ERP SQL. A chave é esperada no header 'X-ERP-SQL-Key'.
+        """
+        def decorator(func):
+            @wraps(func)
+            def wrapper(*args, **kwargs):
+                try:
+
+                    self._requires_erp_sql_key()
+
+                    return func(*args, **kwargs)
+                
+                except Forbidden as e:
+                    return self._format_erro(403, f"{e}")
+                except MissingAuthorizationHeader as e:
+                    return self._format_erro(401, f"{e}")
+                except Unauthorized as e:
+                    return self._format_erro(401, f"{e}")
+                except Exception as e:
+                    self._logger.exception(
+                        f"Erro na autenticação/autorização. Mensagem: {e}")
+                    return self._format_erro(500, f"{e}")
+
+            return wrapper
+        
+        return decorator

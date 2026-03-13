@@ -941,7 +941,7 @@ class Auth:
                 
         except Exception as e:
             self._logger.exception(f"Erro na autenticação ERP SQL: {e}")
-            raise Unauthorized("Chave de acesso inválida")
+            raise Unauthorized("Token ERP SQL inválido ou expirado")
         
 
 

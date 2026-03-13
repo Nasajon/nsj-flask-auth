@@ -98,3 +98,9 @@ from flask import g
 user_profile = g.profile
 
 ```
+
+## Histórico de versões
+
+### 0.11.0
+
+- Possibilidade de validar segurança via TOKEN do ERP SQL, baseado no serial do cliente. Ver [documentação](nsj_flask_auth/docs/como-gerar-o-x-erp-sql-key.md).

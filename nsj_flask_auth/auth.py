@@ -887,6 +887,7 @@ class Auth:
     def _requires_erp_sql_key(self):
     
         try:
+
             # 1. Extrai e decodifica o Header (CNPJ:TOKEN)
             token_header = request.headers.get("X-ERP-SQL-KEY")
             
@@ -901,6 +902,7 @@ class Auth:
 
             cnpj = parts[0]
             token = parts[1]
+            tenant = parts[2]
 
             # 2. Sincronização de Tempo (Janela de 1 hora)
             timestamp_hora = int(time.time() // 3600) * 3600
@@ -921,12 +923,13 @@ class Auth:
                 'token': token,
                 'url': url,
                 'timestamp_hora': timestamp_hora,
-                'body_part': body_part
+                'body_part': body_part,
+                'tenant': tenant
             }
             
             headers = {
                 "X-ERP-SQL-KEY": token
-            }            
+            }
             
             # 6. Chamada HTTP para validação no Service
             response = requests.post(
@@ -938,6 +941,14 @@ class Auth:
             
             if response.status_code != 200:
                 raise Unauthorized("Token ERP SQL inválido ou expirado")
+            
+            data = response.json()
+            
+            g.dados_cliente = {
+                "nome": data.get("nome_cliente"),
+                "cnpj": data.get("cpf_cnpj"),
+                "tenant": data.get("tenant")
+            }
                 
         except Exception as e:
             self._logger.exception(f"Erro na autenticação ERP SQL: {e}")

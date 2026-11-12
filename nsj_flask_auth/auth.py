@@ -35,6 +35,20 @@ class ProfileVendor(Enum):
     NSJ_AUTH_API = 2
 
 
+class AccessTokenValidation(Enum):
+    """Como o access token (Bearer) é validado.
+
+    USERINFO (padrão): GET em `profile_uri` (userinfo do Keycloak), como sempre foi.
+    INTROSPECTION: POST em `introspect_url` (RFC 7662), autenticado com `introspect_token`
+    (Base64 de `client_id:client_secret` do client confidencial da aplicação). Devolve, além
+    de email/nome, o client que emitiu o token (`azp`/`client_id`), o que permite recusar
+    tokens de outras aplicações (`allowed_client_ids`).
+    """
+
+    USERINFO = 1
+    INTROSPECTION = 2
+
+
 class Auth:
     """Esta classe é responsável por disponibilizar um fluxo básico de autenticação através
     dos métodos decoradores requires_api_key, requires_access_token e requires_api_or_access_token.
@@ -52,6 +66,14 @@ class Auth:
     nsj_auth_api_url: Url base da nsj-authorization-api.
 
     nsj_auth_api_token: Token  da nsj-authorization-api.
+
+    access_token_validation: USERINFO (padrão) ou INTROSPECTION. Ver AccessTokenValidation.
+
+    introspect_url / introspect_token: endpoint de introspection do realm e Base64 de
+    `client_id:client_secret`. Obrigatórios com INTROSPECTION.
+
+    allowed_client_ids: clients (azp) cujos tokens a aplicação aceita. Vazio/None = qualquer
+    client (comportamento anterior). Exige INTROSPECTION. Pode ser sobrescrito por decorator.
 
     Recomenda-se instanciar a classe em um arquivo próprio e importar sua instância a partir dele.
 
@@ -88,6 +110,8 @@ class Auth:
         introspect_url: str = None,
         introspect_token: str = None,
         erp_token_validation_url: str = None,
+        access_token_validation: AccessTokenValidation = AccessTokenValidation.USERINFO,
+        allowed_client_ids: List[str] = None,
     ):
         self._diretorio_base_uri = diretorio_base_uri
         self._profile_uri = profile_uri
@@ -106,6 +130,19 @@ class Auth:
         self._introspect_url = introspect_url
         self._introspect_token = introspect_token
         self.erp_token_validation_url = erp_token_validation_url
+        self._access_token_validation = access_token_validation
+        self._allowed_client_ids = self._normalize_client_ids(allowed_client_ids)
+
+        if access_token_validation == AccessTokenValidation.INTROSPECTION and not (
+            introspect_url and introspect_token
+        ):
+            raise ValueError(
+                "AccessTokenValidation.INTROSPECTION exige introspect_url e introspect_token."
+            )
+
+        # O userinfo não diz qual client emitiu o token: a checagem seria impossível,
+        # e ignorá-la em silêncio daria a falsa impressão de proteção.
+        self._check_client_ids_supported(self._allowed_client_ids)
 
         if caching_service:
             self._cache = Caching(caching_service)
@@ -151,6 +188,7 @@ class Auth:
         user_internal_permissions: List = None,
         scope: Scope = Scope.GRUPO_EMPRESARIAL,
         user_scope_permissions: List = None,
+        allowed_client_ids: List[str] = None,
     ):
 
         access_token = request.headers.get(self._access_token_header)
@@ -160,7 +198,12 @@ class Auth:
                 f"Missing {self._access_token_header} header"
             )
 
-        user_profile = self._get_user_profile(access_token)
+        # So' passa a lista quando a rota a definiu: quem substitui `_get_user_profile` (testes, subclasses) com a
+        # assinatura de um argumento continua funcionando.
+        if allowed_client_ids is None:
+            user_profile = self._get_user_profile(access_token)
+        else:
+            user_profile = self._get_user_profile(access_token, allowed_client_ids)
 
         email = user_profile.get("email")
 
@@ -366,7 +409,9 @@ class Auth:
         if request.method in ["GET", "DELETE"]:
             data = request.args
         elif request.method in ["POST", "PUT", "PATCH"]:
-            data = request.get_json()
+            # silent: corpo que não é JSON (multipart, form) não tem escopo no corpo; sem
+            # isso o Flask levanta 400/415 e a requisição autenticada virava erro 500.
+            data = request.get_json(silent=True) or {}
         else:
             data = request.args
 
@@ -413,6 +458,7 @@ class Auth:
         user_internal_permissions: list = None,
         scope: Scope = Scope.GRUPO_EMPRESARIAL,
         user_scope_permissions: list = None,
+        allowed_client_ids: list = None,
     ):
         try:
             self._verify_api_key(app_required_permissions)
@@ -423,7 +469,10 @@ class Auth:
             pass
 
         self._verify_access_token(
-            user_internal_permissions, scope, user_scope_permissions
+            user_internal_permissions,
+            scope,
+            user_scope_permissions,
+            allowed_client_ids,
         )
 
     def _verify_api_key_or_instalacao_key(self, app_required_permissions: list = None):
@@ -438,7 +487,17 @@ class Auth:
         self._verify_instalacao_key(app_required_permissions)
 
     @log_time("Pegar profile a partir do access token")
-    def _get_user_profile(self, access_token):
+    def _get_user_profile(self, access_token, allowed_client_ids: List[str] = None):
+        """Valida o access token e devolve os dados do usuário (ao menos `email` e `name`).
+
+        Com INTROSPECTION, também confere o client que emitiu o token (`allowed_client_ids`
+        do decorator ou, sem ele, o da construção).
+        """
+
+        if self._access_token_validation == AccessTokenValidation.INTROSPECTION:
+            claims = self._introspect_access_token(access_token)
+            self._verify_token_client(claims, allowed_client_ids)
+            return claims
 
         if self._cache:
             user_profile = self._cache.get(access_token)
@@ -467,6 +526,115 @@ class Auth:
             self._cache.set(access_token, response.json())
 
         return response.json()
+
+    def _check_client_ids_supported(self, allowed_client_ids):
+        if allowed_client_ids and (
+            self._access_token_validation != AccessTokenValidation.INTROSPECTION
+        ):
+            raise ValueError(
+                "allowed_client_ids exige access_token_validation=AccessTokenValidation.INTROSPECTION."
+            )
+
+    @staticmethod
+    def _normalize_client_ids(client_ids) -> List[str]:
+        if not client_ids:
+            return []
+        if isinstance(client_ids, str):
+            client_ids = client_ids.split(",")
+        return [str(c).strip() for c in client_ids if str(c or "").strip()]
+
+    def _introspection_authorization(self) -> str:
+        token = self._introspect_token.strip()
+        if token.startswith("Basic "):
+            return token
+        return f"Basic {token}"
+
+    @log_time("Introspection do access token")
+    def _introspect_access_token(self, access_token: str) -> dict:
+        """Introspection (RFC 7662) do access token. Devolve as claims de um token ativo.
+
+        Token inativo/expirado/revogado -> Unauthorized (401). Credencial da aplicação
+        recusada pelo IdP -> InternalUnauthorized (500): é defeito de configuração, não do
+        usuário. O resultado só é guardado em cache para token ativo, e o cache é ignorado
+        depois do `exp` do token.
+        """
+
+        token = (access_token or "").strip()
+        if token.startswith("Basic "):
+            raise UnknowAuthorizationException(
+                "Basic auth should be handled as API Key, not as access token"
+            )
+        if token.startswith("Bearer "):
+            token = token[len("Bearer "):].strip()
+        if not token:
+            raise Unauthorized("O token do usuário não é válido")
+
+        cache_key = f"introspect:{token}"
+        if self._cache:
+            cached = self._cache.get(cache_key)
+            if cached and cached.get("active") is True and not self._claims_expired(cached):
+                return cached
+
+        response = requests.post(
+            self._introspect_url,
+            headers={
+                "Authorization": self._introspection_authorization(),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            data={"token": token, "token_type_hint": "access_token"},
+            timeout=10,
+        )
+
+        if response.status_code in (401, 403):
+            raise InternalUnauthorized(
+                "A credencial de introspection da aplicação (introspect_token) não é válida"
+            )
+        if response.status_code != 200:
+            raise Exception(
+                f"Erro desconhecido na introspection do token: {response.status_code}. Mensagem: {response.content.decode()}"
+            )
+
+        claims = response.json() or {}
+        if claims.get("active") is not True or self._claims_expired(claims):
+            raise Unauthorized("O token do usuário não é válido")
+
+        if self._cache:
+            self._cache.set(cache_key, claims)
+
+        return claims
+
+    @staticmethod
+    def _claims_expired(claims: dict) -> bool:
+        exp = claims.get("exp")
+        if exp is None:
+            return False
+        try:
+            return float(exp) <= time.time()
+        except (TypeError, ValueError):
+            return True
+
+    def _verify_token_client(self, claims: dict, allowed_client_ids: List[str] = None):
+        """Recusa token emitido para um client fora da lista (`azp`, ou `client_id`).
+
+        `allowed_client_ids` do decorator vence o da construção. Lista vazia = sem checagem.
+        Responde 403 (e não 401): o token é válido, só não é desta aplicação; um 401 faria o
+        front pedir login de novo e receber outro token do mesmo client, em loop.
+        """
+
+        allowed = (
+            self._normalize_client_ids(allowed_client_ids)
+            if allowed_client_ids is not None
+            else self._allowed_client_ids
+        )
+        if not allowed:
+            return
+
+        client = claims.get("azp") or claims.get("client_id")
+        if client not in allowed:
+            self._logger.warning(
+                f"Access token de client não autorizado recusado: {client!r} (aceitos: {allowed})"
+            )
+            raise Forbidden("O token não foi emitido para esta aplicação.")
 
     @log_time("Pegar profile a partir da apikey")
     def _get_app_profile(self, api_key):
@@ -669,6 +837,7 @@ class Auth:
         user_internal_permissions: List = None,
         scope: Scope = Scope.GRUPO_EMPRESARIAL,
         user_scope_permissions: List = None,
+        allowed_client_ids: List[str] = None,
     ):
         """Decorador que garante o envio de um access token válido. Caso não seja enviado ou seja
         enviado um access token inválido, a chamada será automaticamente abortada. A parametrização
@@ -677,14 +846,21 @@ class Auth:
         Esta lista trabalha em adição a lista fornceida na inicialização da classe. Também é
         possível fornecer uma lista de permissões por tenant, porém esta funcionalidade ainda
         não está disponível.
+
+        `allowed_client_ids` sobrescreve, só neste endpoint, os clients aceitos na construção
+        (exige INTROSPECTION).
         """
+        self._check_client_ids_supported(self._normalize_client_ids(allowed_client_ids))
 
         def decorator(func):
             @wraps(func)
             def wrapper(*args, **kwargs):
                 try:
                     self._verify_access_token(
-                        user_internal_permissions, scope, user_scope_permissions
+                        user_internal_permissions,
+                        scope,
+                        user_scope_permissions,
+                        allowed_client_ids,
                     )
                     return func(*args, **kwargs)
                 except Forbidden as e:
@@ -711,11 +887,16 @@ class Auth:
         user_internal_permissions: List = None,
         scope: Scope = Scope.GRUPO_EMPRESARIAL,
         user_scope_permissions: List = None,
+        allowed_client_ids: List[str] = None,
     ):
         """Fluxo que implementa os decoradores requires_access_token e requires_api_key.
         Neste fluxo, caso seja enviado na mesma requisição um access token e uma api key,
         primeiro é validado o api-key e se for válido, o access token é ignorado.
+
+        `allowed_client_ids` sobrescreve, só neste endpoint, os clients aceitos na construção
+        (exige INTROSPECTION).
         """
+        self._check_client_ids_supported(self._normalize_client_ids(allowed_client_ids))
 
         def decorator(func):
             @wraps(func)
@@ -726,6 +907,7 @@ class Auth:
                         user_internal_permissions,
                         scope,
                         user_scope_permissions,
+                        allowed_client_ids,
                     )
                     tenant_from_request = self._get_entity_scope_id_from_request(
                         Scope.TENANT
@@ -904,8 +1086,10 @@ class Auth:
             tenants_usuario = user_profile.get("tenants", [])
 
             # Verifica se o tenant da requisição está na lista de tenants do usuário
+            # Aceita o id ou o código do tenant (`?tenant=` costuma vir com o código).
             tenant_encontrado = any(
-                str(t.get("id")) == str(tenant_from_request) for t in tenants_usuario
+                str(tenant_from_request) in (str(t.get("id")), str(t.get("codigo")))
+                for t in tenants_usuario
             )
 
             if not tenant_encontrado:

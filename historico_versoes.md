@@ -11,3 +11,12 @@ Novas features:
 
 Novas features:
 * Suporte para apikeys de tenant
+
+## 0.12.0
+
+Novas features:
+* Validação do access token por introspection e checagem do client que emitiu o token (`allowed_client_ids`). Opcional e retrocompatível.
+
+Correções:
+* POST/PUT/PATCH com corpo não JSON (multipart, form) não dá mais erro 500 nos decorators que conferem o tenant.
+* A conferência do tenant da requisição aceita o código do tenant, além do id.

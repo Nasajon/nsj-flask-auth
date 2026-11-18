@@ -88,6 +88,30 @@ Decorator que garante o envio de um access_token na requisição. O decorator re
 
 Decorator que implementa os dois fluxos de autenticação disponíveis (api-key e access_token). Importante notar que neste fluxo o primeiro parâmetro verificado é api-key e caso este seja autorizado o acesso é garantido, independente do access_token enviado.
 
+## Validação do access token por introspection e client esperado
+
+Por padrão o access token é validado no userinfo (`profile_uri`), que não diz para qual aplicação o token foi emitido. A partir da 0.12.0, dá para validar por introspection (RFC 7662) e aceitar só tokens dos clients esperados:
+
+```python
+from nsj_flask_auth import Auth, AccessTokenValidation
+
+auth = Auth(
+    DIRETORIO_URL, PROFILE_URL, API_KEY,
+    introspect_url=INTROSPECT_URL,      # .../realms/<realm>/protocol/openid-connect/token/introspect
+    introspect_token=INTROSPECT_TOKEN,  # Base64("<client_id>:<client_secret>") do client confidencial da aplicação
+    access_token_validation=AccessTokenValidation.INTROSPECTION,
+    allowed_client_ids=["meu-front", "painel-do-cliente"],  # opcional
+)
+```
+
+* ACCESS_TOKEN_VALIDATION: `USERINFO` (padrão, comportamento anterior) ou `INTROSPECTION`.
+* ALLOWED_CLIENT_IDS: clients (`azp`, ou `client_id`) cujos tokens são aceitos. Lista ou string separada por vírgula. Vazio = qualquer client. Exige `INTROSPECTION` (a construção falha sem ela, para não dar falsa sensação de proteção). Token de outro client recebe **403**, e não 401, para o front não entrar em loop de login.
+* Os decorators `requires_access_token` e `requires_api_key_or_access_token` aceitam `allowed_client_ids=` para sobrescrever a lista num endpoint específico.
+* Token inativo, expirado ou revogado: 401. Credencial de introspection recusada pelo IdP: 500 (defeito de configuração).
+* Com `caching_service`, só o resultado de token ativo vai para o cache, e a entrada deixa de valer no `exp` do token.
+
+Quem não passa os parâmetros novos segue exatamente como antes.
+
 ## Acessar dados do usuário
 
 Os dados do usuário estão disponíveis no contexto da aplicação Flask.
@@ -100,6 +124,12 @@ user_profile = g.profile
 ```
 
 ## Histórico de versões
+
+### 0.12.0
+
+- Validação do access token por introspection (`access_token_validation=AccessTokenValidation.INTROSPECTION`) e recusa de tokens de clients fora de `allowed_client_ids` (na construção ou por decorator). Opcional: sem os parâmetros novos, nada muda.
+- Corrige erro 500 em POST/PUT/PATCH com corpo que não é JSON (multipart, form) nos decorators que conferem o escopo de tenant.
+- A conferência do tenant da requisição (`?tenant=`/corpo) aceita também o código do tenant, além do id.
 
 ### 0.11.0
 

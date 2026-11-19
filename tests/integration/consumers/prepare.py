@@ -44,7 +44,7 @@ for name,repo,port in apps:
         database_port='5432',database_timeoutmiliseconds='5000',database_driver='pdo_pgsql',database_server_version=os.getenv('SERVICE_ACCOUNT_POSTGRES_VERSION','16.1'),
         memcached_host='memcached',memcached_port='11211',api_key='fixture-legacy-application-key',
         diretorio_url='http://authority:8080/',diretorio_sistema_id='297' if name=='erp' else '664',
-        AUTHORIZATION_API_URL='http://authority:8080/authz-api',SERVICE_ACCOUNT_REDIS_URL='redis://redis:6379/0',
+        AUTHORIZATION_API_URL='http://authority:8080/authz-api',SERVICE_ACCOUNT_REDIS_URL='redis://redis:6379/0',AUDIT_REDIS_URL=os.getenv('SERVICE_ACCOUNT_TEST_AUDIT_REDIS_URL',''),AUDIT_STREAM_KEY='audit:requests',AUDIT_SERVICE_NAME=name,
         SERVICE_ACCOUNT_TRUSTED_PROXIES='',SERVICE_ACCOUNT_IP_HEADER='X-Real-IP',SERVICE_ACCOUNT_READ_FUNCTIONS='READ',
         amazon_region='us-east-1',amazon_s3_version='2006-03-01',AWS_EC2_METADATA_DISABLED='true',SENTRY_DSN='',SENTRY_TEST_ENABLED='0',secret='fixture-only-secret-at-least-32-characters',
         sp_metadata='',sp_certificate_crt='',sp_certificate_pem='',ENV='local',locale='pt_BR')
@@ -66,7 +66,7 @@ for name,repo,port in [('estoque','estoque-api',18904),('tesouraria','tesouraria
         DEFAULT_EXTERNAL_DATABASE_USER='forbidden_default_must_never_be_used',DEFAULT_EXTERNAL_DATABASE_PASSWORD='invalid-fixture-default',
         DIRETORIO_URL='http://authority:8080/',APIKEY_VALIDATE_URL='http://authority:8080/',OAUTH_USER_INFO_URL='http://127.0.0.1:9/',
         AUTHORIZATION_API_URL='http://authority:8080/authz-api',SERVICE_ACCOUNT_SYSTEM_ID='664',SERVICE_ACCOUNT_READ_FUNCTIONS='READ',
-        SERVICE_ACCOUNT_REDIS_URL='redis://redis:6379/0',SERVICE_ACCOUNT_TRUSTED_PROXIES='',
+        SERVICE_ACCOUNT_REDIS_URL='redis://redis:6379/0',AUDIT_REDIS_URL=os.getenv('SERVICE_ACCOUNT_TEST_AUDIT_REDIS_URL',''),AUDIT_STREAM_KEY='audit:requests',AUDIT_SERVICE_NAME=name,SERVICE_ACCOUNT_TRUSTED_PROXIES='',
         MULTIDATABASE_API_URL='http://authority:8080/v1/erp/credentials',SERVICE_ACCOUNT_TOKEN_URL='http://authority:8080/token',
         SERVICE_ACCOUNT_CLIENT_ID=name+'-api',SERVICE_ACCOUNT_CLIENT_SECRET='fixture-client-secret')
     packaged=os.getenv('SERVICE_ACCOUNT_PACKAGED_IMAGES')=='1'

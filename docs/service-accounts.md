@@ -18,3 +18,12 @@ Testes offline: python -m pytest -q tests. Testes históricos de SSO externo fic
 
 Publicar 0.13.0 no índice de distribuição antes de um deploy normal. Enquanto isso, o CI dos consumidores constrói a wheel da revisão imutável registrada em .service-account-library-ref; nenhum segredo nem wheel é versionado.
 
+## Medição pela auditoria (opcional)
+
+As aplicações publicam eventos canônicos em `audit:requests`; a auditoria consolida chamadas, recusas atribuíveis e último uso das chaves. Não há contadores de consumo em `SERVICE_ACCOUNT_REDIS_URL` nem job de resumo no Diretório.
+
+`AUDIT_REDIS_URL` é o canal opcional de publicação, independente do Redis de nonces; `AUDIT_STREAM_KEY` é `audit:requests` e `AUDIT_SERVICE_NAME` identifica esta aplicação. Sem URL não há tentativa de conexão. Em DEV/QA, onde não há API de auditoria, deixar a configuração vazia: autenticação, consultas e gestão continuam funcionando. Se o canal configurado cair, a publicação usa timeout curto e circuito de 30 s, sem alterar a resposta da aplicação. Eventos podem se perder durante a indisponibilidade.
+
+O Diretório consulta o consumo pela API interna da auditoria usando seu próprio OAuth Client Credentials (client permitido, audiência e escopo exclusivos de leitura). Sem essa API/configuração, o consumo informa `disponivel=false`; os painéis exibem “Medição indisponível”, nunca zero chamadas medido. Nenhuma consulta de consumo encaminha a chave `nsa_` ou um token de trabalhador.
+
+`SERVICE_ACCOUNT_REDIS_URL` continua necessário para contas que exigem assinatura: reserva global de nonce com `SET NX EX 600`, compartilhada pelos verificadores, persistência/HA. Se esse Redis falhar, chamadas assinadas retornam 503; desligar auditoria não remove assinatura, IP, permissão ou bloqueio de rotas de funcionário/gestor.

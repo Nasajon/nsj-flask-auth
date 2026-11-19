@@ -21,10 +21,11 @@ from urllib.parse import quote, urljoin
 import requests
 from flask import g, has_request_context, jsonify, request
 
+from ._service_account_audit import AuditPublisher, events as audit_events, start as audit_start
 from ._service_account_errors import AuthError, ForbiddenError, UnauthorizedError
 from ._service_account_core import (
     ServiceAccountAuthenticator, ServiceAccountUnavailable, ServiceAccountForbidden, conferir_protecoes,
-    ip_do_cliente, registrar_uso, classe_da_resposta, user_data_da_conta,
+    ip_do_cliente, user_data_da_conta,
 )
 
 
@@ -72,7 +73,7 @@ class Redactor(logging.Filter):
 
 class ServiceAccountExtension:
     def __init__(self, app, auth, *, routes, system_id, functions, directory_url,
-                 application_key, redis=None, transport=None, database=None, target_filters=None):
+                 application_key, redis=None, transport=None, database=None, target_filters=None, audit=None):
         self.auth = auth
         self.routes = routes
         self.target_filters = target_filters or {}
@@ -81,6 +82,7 @@ class ServiceAccountExtension:
         self.directory_url = directory_url or ''
         self.application_key = application_key or ''
         self.redis = redis
+        self.audit = audit or AuditPublisher()
         self.http = transport or requests.Session()
         self.database = database or self._database
         self.authority = ServiceAccountAuthenticator(
@@ -229,11 +231,12 @@ class ServiceAccountExtension:
         if not self._attempt():
             return None
         g._service_account_attempt = True
+        g._service_account_audit = audit_start()
         try:
             key = self._credentials()
             account = self.authority.autenticar(key)
             self._validate(account, key)  # Includes expiration on every cache hit.
-            g.service_account = {k: account[k] for k in ('conta_id', 'email', 'prefixo', 'version')}
+            g.service_account = {k: account.get(k) for k in ('conta_id', 'email', 'prefixo', 'version', 'tenant')}
             raw_uri = request.environ.get('RAW_URI') or request.environ.get('REQUEST_URI')
             if not raw_uri:
                 raw_uri = request.path + ('?' + request.query_string.decode('ascii') if request.query_string else '')
@@ -302,11 +305,17 @@ class ServiceAccountExtension:
                 'user': data['user'], 'password': data['password'], 'tenant': tenant, 'user_id': data.get('user_id')}
 
     def after_request(self, response):
+        snapshot = g.get('_service_account_audit')
+        if snapshot and not snapshot.get('finished') and not g.get('_service_account_audit_native'):
+            snapshot['finished'] = True
+            account = g.get('service_account')
+            tenant = g.get('service_account_tenant') or (account or {}).get('tenant')
+            pair = audit_events(snapshot, account=account, tenant=tenant,
+                route=request.endpoint, method=request.method, status=response.status_code,
+                reason=g.get('_service_account_reason'), application=os.getenv('AUDIT_SERVICE_NAME', 'flask-api'))
+            self.audit.publish(pair[-1:] if g.get('_service_account_audit_native_started') else pair)
         account = g.get('service_account')
         if account:
-            reason = g.get('_service_account_reason')
-            category = ('recusa:' + reason) if response.status_code == 403 and reason in ('ip', 'assinatura') else classe_da_resposta(response.status_code)
-            registrar_uso(self._redis(), account, category)
             self.auth._logger.info('service_account.request %s', json.dumps({
                 'source_system': 'sa_' + str(account['conta_id']), 'actor_user_id': account['email'],
                 'prefixo': account['prefixo'], 'version': account['version'],

@@ -21,3 +21,5 @@ A bateria verifica as 12 operações GET declaradas, provisões/entidades, tenan
 
 As respostas/evidências salvas contêm apenas nomes de cenários e status; config.json e arquivos PEM nunca são artefatos de CI. Remover .local/config.json e PEM após finalizar. Para testar imagens Python empacotadas, prepare.py aceita SERVICE_ACCOUNT_PACKAGED_IMAGES=1.
 
+
+Auditoria opcional: o prepare aceita `SERVICE_ACCOUNT_TEST_AUDIT_REDIS_URL` (padrão vazio). Execute `optional-audit.py absent` no client com esse padrão; recrie apenas os cinco serviços de aplicação com a variável apontando para `redis://127.0.0.1:9/0` e execute `optional-audit.py unreachable`. Os 20 checks por cenário verificam chamadas normais/assinadas, replay recusado, chave em Bearer recusada e ausência dos hashes antigos. A indisponibilidade de auditoria não usa fallback de autenticação.

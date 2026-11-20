@@ -1,5 +1,6 @@
 # pylint: disable=C0301, C0114, C0115, W0718, W0719, W1203, W3101, C0415, W102, C0411
 import os
+import re
 import logging
 import requests
 
@@ -206,6 +207,8 @@ class Auth:
             user_profile = self._get_user_profile(access_token, allowed_client_ids)
 
         email = user_profile.get("email")
+        if isinstance(email, str) and email.lower().endswith('@svc.nasajon.app'):
+            raise Unauthorized('Conta de serviço exige X-API-Key.')
 
         if not email:
             raise Unauthorized("O token do usuário não é válido")
@@ -294,6 +297,8 @@ class Auth:
             )
 
         user_profile = response.json()
+        if user_profile.get('tipo') == 'SERVICO' or str(user_profile.get('email', '')).lower().endswith('@svc.nasajon.app'):
+            raise Unauthorized('Conta de serviço exige X-API-Key.')
 
         if self._cache:
             self._cache.set(email, user_profile)
@@ -372,6 +377,8 @@ class Auth:
     def _verify_user_permissions(self, user_internal_permissions: List, email: str):
 
         user_profile = self._get_user_profile_vendor(email)
+        if user_profile.get('tipo') == 'SERVICO' or str(user_profile.get('email', '')).lower().endswith('@svc.nasajon.app'):
+            raise Unauthorized('Conta de serviço exige X-API-Key.')
 
         if not user_internal_permissions:
             return user_profile
@@ -460,6 +467,9 @@ class Auth:
         user_scope_permissions: list = None,
         allowed_client_ids: list = None,
     ):
+        if any(re.match(r'^(?:Bearer\s+)?nsa_', str(request.headers.get(name, '')).strip(), re.I)
+               for name in (self._api_key_header, self._access_token_header)):
+            raise Unauthorized('Conta de serviço exige adesão explícita por X-API-Key.')
         try:
             self._verify_api_key(app_required_permissions)
             return
@@ -476,6 +486,9 @@ class Auth:
         )
 
     def _verify_api_key_or_instalacao_key(self, app_required_permissions: list = None):
+        if any(re.match(r'^(?:Bearer\s+)?nsa_', str(request.headers.get(name, '')).strip(), re.I)
+               for name in (self._api_key_header, self._access_token_header)):
+            raise Unauthorized('Conta de serviço exige adesão explícita por X-API-Key.')
         try:
             self._verify_api_key(app_required_permissions)
             return
@@ -488,6 +501,9 @@ class Auth:
 
     @log_time("Pegar profile a partir do access token")
     def _get_user_profile(self, access_token, allowed_client_ids: List[str] = None):
+        if bool(re.match(r'^(?:Bearer\s+)?nsa_', str(access_token or '').strip(), re.I)):
+            raise Unauthorized("Conta de serviço exige X-API-Key e adesão explícita.")
+
         """Valida o access token e devolve os dados do usuário (ao menos `email` e `name`).
 
         Com INTROSPECTION, também confere o client que emitiu o token (`allowed_client_ids`
@@ -638,6 +654,9 @@ class Auth:
 
     @log_time("Pegar profile a partir da apikey")
     def _get_app_profile(self, api_key):
+        if bool(re.match(r'^(?:Bearer\s+)?nsa_', str(api_key or '').strip(), re.I)):
+            raise Unauthorized("Conta de serviço exige X-API-Key e adesão explícita.")
+
 
         if self._cache:
             app_profile = self._cache.get(api_key)
@@ -669,6 +688,8 @@ class Auth:
 
     @log_time("Pegar profile a partir da instalação")
     def _get_app_profile_by_instalacao(self, instalacao):
+        if bool(re.match(r'^nsa_', str(instalacao or '').strip(), re.I)):
+            raise Unauthorized('Conta de serviço não é uma chave de instalação.')
 
         if self._cache:
             app_profile = self._cache.get(instalacao)
@@ -902,6 +923,8 @@ class Auth:
             @wraps(func)
             def wrapper(*args, **kwargs):
                 try:
+                    if g.get('_service_account_authenticated') is True:
+                        return func(*args, **kwargs)
                     self._verify_api_key_or_access_token(
                         app_required_permissions,
                         user_internal_permissions,
@@ -935,6 +958,8 @@ class Auth:
         return decorator
 
     def _fast_access_token_or_apikey(self, access_token: str, apikey: str):
+        if any(re.match(r'^(?:Bearer\s+)?nsa_', str(v or '').strip(), re.I) for v in (access_token, apikey)):
+            raise Unauthorized('Conta de serviço exige adesão explícita por X-API-Key.')
 
         if access_token:
             # Se for Bearer
